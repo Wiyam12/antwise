@@ -1,0 +1,8 @@
+abstract final class HiveBoxes {
+  static const String pagesBox = 'pages_box';
+  static const String widgetsBox = 'widgets_box';
+  static const String tablesBox = 'tables_box';
+  static const String rowsBox = 'rows_box';
+  static const String navigationBox = 'navigation_box';
+  static const String settingsBox = 'settings_box';
+}
