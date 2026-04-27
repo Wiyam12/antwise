@@ -22,6 +22,25 @@ class SettingsDrawerNavPage extends GetView<SettingsController> {
     );
   }
 
+  String? _effectiveMainPageId() {
+    final String? configuredMainId = controller.mainPageId.value;
+    if (configuredMainId == null) {
+      return null;
+    }
+    final BuilderPageEntity? mainPage = controller.pageById(configuredMainId);
+    if (mainPage == null || !mainPage.isDrawerParentContainer) {
+      return configuredMainId;
+    }
+    final List<String> childIds = controller.drawerChildIdsOf(configuredMainId);
+    for (final String childId in childIds) {
+      final BuilderPageEntity? child = controller.pageById(childId);
+      if (child != null && !child.isDeleted) {
+        return child.id;
+      }
+    }
+    return configuredMainId;
+  }
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -42,6 +61,7 @@ class SettingsDrawerNavPage extends GetView<SettingsController> {
         }
         controller.pagesRevision.value;
         final List<String> parentIds = controller.drawerParentIds;
+        final String? effectiveMainPageId = _effectiveMainPageId();
         return ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           children: <Widget>[
@@ -95,7 +115,7 @@ class SettingsDrawerNavPage extends GetView<SettingsController> {
                         child: const SizedBox.shrink(),
                       );
                     }
-                    final bool isMain = controller.mainPageId.value == parentId;
+                    final bool isMain = effectiveMainPageId == parentId;
                     final List<String> childIds = controller.drawerChildIdsOf(
                       parentId,
                     );
@@ -105,6 +125,7 @@ class SettingsDrawerNavPage extends GetView<SettingsController> {
                         parent: parent,
                         isMain: isMain,
                         childIds: childIds,
+                        effectiveMainPageId: effectiveMainPageId,
                         parentIndex: index,
                         controller: controller,
                         onEdit: () => _openIconPicker(context, parent),
@@ -126,6 +147,7 @@ class _ParentDrawerItem extends StatelessWidget {
     required this.parent,
     required this.isMain,
     required this.childIds,
+    required this.effectiveMainPageId,
     required this.parentIndex,
     required this.controller,
     required this.onEdit,
@@ -135,6 +157,7 @@ class _ParentDrawerItem extends StatelessWidget {
   final BuilderPageEntity parent;
   final bool isMain;
   final List<String> childIds;
+  final String? effectiveMainPageId;
   final int parentIndex;
   final SettingsController controller;
   final VoidCallback onEdit;
@@ -235,71 +258,192 @@ class _ParentDrawerItem extends StatelessWidget {
                   child: const SizedBox.shrink(),
                 );
               }
+              final List<String> nestedChildIds = controller.drawerChildIdsOf(
+                child.id,
+              );
               return Material(
                 key: ValueKey<String>('drawer-child-${parent.id}-$childId'),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 4,
-                    horizontal: 4,
-                  ),
-                  child: Row(
-                    children: <Widget>[
-                      const SizedBox(width: 16),
-                      ReorderableDragStartListener(
-                        index: childIndex,
-                        child: Icon(
-                          Icons.drag_handle,
-                          size: 20,
-                          color: theme.colorScheme.outline,
-                        ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 4,
+                        horizontal: 4,
                       ),
-                      const SizedBox(width: 8),
-                      Icon(
-                        AppIconRegistry.iconOf(child.iconName),
-                        size: 20,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          child.name,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined),
-                        tooltip: 'Edit child page',
-                        onPressed:
-                            () => PageIconPickerSheet.show(
-                              context,
-                              initialKey: child.iconName,
-                              initialName: child.name,
-                              onSave: (String key, String name) async {
-                                await controller.updatePageDetails(
-                                  child.id,
-                                  iconName: key,
-                                  name: name,
-                                );
-                              },
+                      child: Row(
+                        children: <Widget>[
+                          const SizedBox(width: 16),
+                          ReorderableDragStartListener(
+                            index: childIndex,
+                            child: Icon(
+                              Icons.drag_handle,
+                              size: 20,
+                              color: theme.colorScheme.outline,
                             ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(
+                            AppIconRegistry.iconOf(child.iconName),
+                            size: 20,
+                            color: theme.colorScheme.primary,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              child.name,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (effectiveMainPageId == child.id)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primaryContainer,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'MAIN',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined),
+                            tooltip: 'Edit child page',
+                            onPressed:
+                                () => PageIconPickerSheet.show(
+                                  context,
+                                  initialKey: child.iconName,
+                                  initialName: child.name,
+                                  onSave: (String key, String name) async {
+                                    await controller.updatePageDetails(
+                                      child.id,
+                                      iconName: key,
+                                      name: name,
+                                    );
+                                  },
+                                ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            tooltip: 'Remove child from drawer navigation',
+                            onPressed:
+                                () => controller.removeFromDrawer(childId),
+                          ),
+                        ],
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        tooltip: 'Remove child from drawer navigation',
-                        onPressed: () => controller.removeFromDrawer(childId),
+                    ),
+                    if (nestedChildIds.isNotEmpty)
+                      ...nestedChildIds.map(
+                        (String nestedId) => _NestedDrawerTreeNode(
+                          pageId: nestedId,
+                          controller: controller,
+                          depth: 2,
+                          trail: <String>{parent.id, child.id},
+                        ),
                       ),
-                    ],
-                  ),
+                  ],
                 ),
               );
             },
           ),
       ],
+    );
+  }
+}
+
+class _NestedDrawerTreeNode extends StatelessWidget {
+  const _NestedDrawerTreeNode({
+    required this.pageId,
+    required this.controller,
+    required this.depth,
+    required this.trail,
+  });
+
+  final String pageId;
+  final SettingsController controller;
+  final int depth;
+  final Set<String> trail;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final BuilderPageEntity? page = controller.pageById(pageId);
+    if (page == null || trail.contains(page.id)) {
+      return const SizedBox.shrink();
+    }
+    final List<String> childIds = controller.drawerChildIdsOf(page.id);
+    final Set<String> nextTrail = <String>{...trail, page.id};
+    return Padding(
+      padding: EdgeInsets.fromLTRB(24.0 + (depth * 16), 2, 4, 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(
+                AppIconRegistry.iconOf(page.iconName),
+                size: 18,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  page.name,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.edit_outlined),
+                tooltip: 'Edit child page',
+                onPressed:
+                    () => PageIconPickerSheet.show(
+                      context,
+                      initialKey: page.iconName,
+                      initialName: page.name,
+                      onSave: (String key, String name) async {
+                        await controller.updatePageDetails(
+                          page.id,
+                          iconName: key,
+                          name: name,
+                        );
+                      },
+                    ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: 'Remove child from drawer navigation',
+                onPressed: () => controller.removeFromDrawer(page.id),
+              ),
+            ],
+          ),
+          if (childIds.isNotEmpty)
+            ...childIds.map(
+              (String childId) => _NestedDrawerTreeNode(
+                pageId: childId,
+                controller: controller,
+                depth: depth + 1,
+                trail: nextTrail,
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

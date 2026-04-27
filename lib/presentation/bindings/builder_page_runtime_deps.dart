@@ -8,6 +8,7 @@ import 'package:antwise/data/repositories/table_schema_repository_impl.dart';
 import 'package:antwise/domain/repositories/builder_widget_repository.dart';
 import 'package:antwise/domain/repositories/table_row_repository.dart';
 import 'package:antwise/domain/repositories/table_schema_repository.dart';
+import 'package:antwise/domain/usecases/apply_affecting_tables_usecase.dart';
 import 'package:antwise/domain/usecases/apply_inventory_deduction_usecase.dart';
 import 'package:antwise/domain/usecases/delete_table_row_usecase.dart';
 import 'package:antwise/domain/usecases/get_builder_widgets_by_page_usecase.dart';
@@ -104,6 +105,12 @@ void ensureBuilderPageRuntimeDependenciesRegistered() {
   if (!Get.isRegistered<ApplyInventoryDeductionUseCase>()) {
     Get.lazyPut<ApplyInventoryDeductionUseCase>(
       () => ApplyInventoryDeductionUseCase(Get.find<TableRowRepository>()),
+      fenix: true,
+    );
+  }
+  if (!Get.isRegistered<ApplyAffectingTablesUseCase>()) {
+    Get.lazyPut<ApplyAffectingTablesUseCase>(
+      () => ApplyAffectingTablesUseCase(Get.find<TableRowRepository>()),
       fenix: true,
     );
   }

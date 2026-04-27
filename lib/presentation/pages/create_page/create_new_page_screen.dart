@@ -1,5 +1,6 @@
 import 'package:antwise/domain/entities/builder_page_entity.dart';
 import 'package:antwise/presentation/controllers/create_new_page_controller.dart';
+import 'package:antwise/presentation/models/page_creation_placement.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -84,8 +85,171 @@ class CreateNewPageScreen extends GetView<CreateNewPageController> {
                 ),
               ),
             ),
+            const SizedBox(height: 24),
+            Text('Page placement type', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              'Standalone pages are added to the app shell. '
+              'Nested pages are grouped under a parent and shown as tabs or segments.',
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            Obx(() {
+              return SegmentedButton<PageCreationPlacement>(
+                showSelectedIcon: false,
+                segments: const <ButtonSegment<PageCreationPlacement>>[
+                  ButtonSegment<PageCreationPlacement>(
+                    value: PageCreationPlacement.standalone,
+                    label: Text('Standalone'),
+                    icon: Icon(Icons.web_asset_outlined, size: 18),
+                  ),
+                  ButtonSegment<PageCreationPlacement>(
+                    value: PageCreationPlacement.nestedInPage,
+                    label: Text('Nested in page'),
+                    icon: Icon(Icons.account_tree_outlined, size: 18),
+                  ),
+                ],
+                selected: <PageCreationPlacement>{
+                  controller.pagePlacement.value,
+                },
+                onSelectionChanged: (Set<PageCreationPlacement> next) {
+                  if (next.isEmpty) {
+                    return;
+                  }
+                  controller.setPagePlacement(next.first);
+                  if (next.first == PageCreationPlacement.nestedInPage) {
+                    controller.setPlacementDrawer();
+                  }
+                },
+              );
+            }),
+            Obx(() {
+              if (controller.pagePlacement.value !=
+                  PageCreationPlacement.nestedInPage) {
+                return const SizedBox.shrink();
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  const SizedBox(height: 20),
+                  Text(
+                    'Container display type',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  SegmentedButton<NestedPageDisplayType>(
+                    showSelectedIcon: false,
+                    segments: const <ButtonSegment<NestedPageDisplayType>>[
+                      ButtonSegment<NestedPageDisplayType>(
+                        value: NestedPageDisplayType.tab,
+                        label: Text('Tabs'),
+                        icon: Icon(Icons.tab, size: 18),
+                      ),
+                      ButtonSegment<NestedPageDisplayType>(
+                        value: NestedPageDisplayType.segmented,
+                        label: Text('Segments'),
+                        icon: Icon(Icons.view_agenda_outlined, size: 18),
+                      ),
+                    ],
+                    selected: <NestedPageDisplayType>{
+                      controller.selectedNestedDisplayType.value,
+                    },
+                    onSelectionChanged: (Set<NestedPageDisplayType> next) {
+                      if (next.isEmpty) {
+                        return;
+                      }
+                      controller.selectedNestedDisplayType.value = next.first;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Parent page', style: theme.textTheme.titleSmall),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String?>(
+                    value: controller.selectedNestedParentPageId.value,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      labelText: 'Select existing page',
+                    ),
+                    items: <DropdownMenuItem<String?>>[
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('— Choose parent —'),
+                      ),
+                      ...controller.allPages
+                          .where((BuilderPageEntity p) {
+                            if (p.isDeleted) {
+                              return false;
+                            }
+                            // Only allow depth-1 pages:
+                            // - page must be a child itself
+                            // - its parent must be a top-level/root page
+                            final String? parentId = p.parentPageId;
+                            if (parentId == null) {
+                              return false; // exclude root/top-level pages
+                            }
+                            final BuilderPageEntity? parent = controller
+                                .allPages
+                                .firstWhereOrNull(
+                                  (BuilderPageEntity candidate) =>
+                                      candidate.id == parentId &&
+                                      !candidate.isDeleted,
+                                );
+                            if (parent == null) {
+                              return false;
+                            }
+                            return parent.parentPageId == null;
+                          })
+                          .map(
+                            (BuilderPageEntity p) => DropdownMenuItem<String?>(
+                              value: p.id,
+                              child: Text(p.name),
+                            ),
+                          ),
+                    ],
+                    onChanged: controller.onNestedParentPageChanged,
+                  ),
+                  Obx(() {
+                    if (controller.pagePlacement.value !=
+                        PageCreationPlacement.nestedInPage) {
+                      return const SizedBox.shrink();
+                    }
+                    if (!controller.showInitialContentTabNameField.value) {
+                      return const SizedBox.shrink();
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        const SizedBox(height: 16),
+                        Text(
+                          'Current existing content tab name',
+                          style: theme.textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'The parent page already has widgets or a table. '
+                          'This label is used for the first tab that keeps that content.',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller:
+                              controller.currentContentTabNameController,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: const InputDecoration(
+                            labelText: 'e.g. Overview, Dashboard',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ],
+                    );
+                  }),
+                ],
+              );
+            }),
             Obx(() {
               final bool shouldAskSecondPage =
+                  controller.pagePlacement.value ==
+                      PageCreationPlacement.standalone &&
                   controller.showInBottomNav.value &&
                   controller.requiresSecondBottomPage.value;
               if (!shouldAskSecondPage) {
@@ -120,23 +284,39 @@ class CreateNewPageScreen extends GetView<CreateNewPageController> {
                 ],
               );
             }),
-            const SizedBox(height: 24),
-            Text('Navigation placement', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 4),
-            Text(
-              'Select one placement for this page.',
-              style: theme.textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
-            Obx(
-              () => _PlacementToggleBar(
-                bottomSelected: controller.showInBottomNav.value,
-                drawerSelected: controller.showInDrawer.value,
-                onBottomTap: controller.setPlacementBottomNav,
-                onDrawerTap: controller.setPlacementDrawer,
-              ),
-            ),
             Obx(() {
+              if (controller.pagePlacement.value ==
+                  PageCreationPlacement.nestedInPage) {
+                return const SizedBox.shrink();
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  const SizedBox(height: 24),
+                  Text(
+                    'Navigation placement',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Select one placement for this page.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  _PlacementToggleBar(
+                    bottomSelected: controller.showInBottomNav.value,
+                    drawerSelected: controller.showInDrawer.value,
+                    onBottomTap: controller.setPlacementBottomNav,
+                    onDrawerTap: controller.setPlacementDrawer,
+                  ),
+                ],
+              );
+            }),
+            Obx(() {
+              if (controller.pagePlacement.value ==
+                  PageCreationPlacement.nestedInPage) {
+                return const SizedBox.shrink();
+              }
               if (!controller.showInDrawer.value) {
                 return const SizedBox.shrink();
               }
@@ -336,7 +516,12 @@ class _ToggleOption extends StatelessWidget {
             style: theme.textTheme.labelSmall?.copyWith(
               fontWeight: FontWeight.w700,
 
-              color: selected ? scheme.primary : scheme.onPrimary,
+              color:
+                  selected
+                      ? (theme.brightness == Brightness.dark
+                          ? Colors.white
+                          : scheme.primary)
+                      : scheme.onPrimary,
             ),
           ),
         ),

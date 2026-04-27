@@ -176,7 +176,7 @@ class SettingsBottomNavPage extends GetView<SettingsController> {
                                 Icon(
                                   AppIconRegistry.iconOf(page.iconName),
                                   size: 26,
-                                  color: theme.colorScheme.primary,
+                                  color: _resolvedMainColor(theme),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
@@ -280,4 +280,12 @@ class SettingsBottomNavPage extends GetView<SettingsController> {
       }),
     );
   }
+}
+
+Color _resolvedMainColor(ThemeData theme) {
+  final Color base = theme.colorScheme.primary;
+  if (theme.brightness != Brightness.dark) {
+    return base;
+  }
+  return Color.alphaBlend(Colors.white.withValues(alpha: 0.22), base);
 }

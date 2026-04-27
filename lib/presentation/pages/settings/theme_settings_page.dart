@@ -87,6 +87,12 @@ class ThemeSettingsPage extends GetView<AppThemeController> {
                     }
                     showAppSnackbar('Theme', 'Theme settings saved');
                   },
+                  style:
+                      preset.name.toLowerCase() == 'ocean blue'
+                          ? FilledButton.styleFrom(
+                            foregroundColor: Colors.white,
+                          )
+                          : null,
                   child: const Text('Save Theme Changes'),
                 ),
               ),
@@ -214,6 +220,12 @@ class ThemeSettingsPage extends GetView<AppThemeController> {
                       children: <Widget>[
                         FilledButton(
                           onPressed: () {},
+                          style:
+                              preset.name.toLowerCase() == 'ocean blue'
+                                  ? FilledButton.styleFrom(
+                                    foregroundColor: Colors.white,
+                                  )
+                                  : null,
                           child: const Text('Preview Button'),
                         ),
                         const SizedBox(height: 12),

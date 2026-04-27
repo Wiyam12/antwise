@@ -49,8 +49,7 @@ class ApplyInventoryDeductionUseCase {
         hasMatchCol = true;
       }
       if (c.id == config.stockQuantityColumnId &&
-          (c.type == TableColumnType.number ||
-              c.type == TableColumnType.currency)) {
+          c.type == TableColumnType.number) {
         hasQtyCol = true;
       }
     }

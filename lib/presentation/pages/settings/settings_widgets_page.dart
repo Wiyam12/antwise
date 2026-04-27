@@ -1,4 +1,5 @@
 import 'package:antwise/domain/entities/builder_widget_entity.dart';
+import 'package:antwise/core/icons/app_icon_registry.dart';
 import 'package:antwise/presentation/controllers/settings_widgets_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -31,6 +32,7 @@ class SettingsWidgetsPage extends GetView<SettingsWidgetsController> {
                 key: ValueKey<String>('page-${page.id}-$expanded'),
                 initiallyExpanded: expanded,
                 onExpansionChanged: (_) => controller.toggleExpanded(page.id),
+                leading: Icon(AppIconRegistry.iconOf(page.iconName)),
                 title: Text(page.name),
                 children: <Widget>[
                   if (pageWidgets.isEmpty)

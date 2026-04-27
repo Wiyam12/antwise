@@ -146,18 +146,25 @@ class _BuilderShell extends StatelessWidget {
                 duration: const Duration(milliseconds: 280),
                 switchInCurve: Curves.easeOutCubic,
                 switchOutCurve: Curves.easeInCubic,
-                child: BuilderBottomNavBar(
-                  key: ValueKey<String>(
-                    '${controller.bottomNavLayout.value.name}-'
-                    '${controller.bottomNavCenterPageId.value ?? 'none'}-'
-                    '${controller.bottomNavShowLabels.value}',
+                child: Theme(
+                  data: theme.copyWith(
+                    colorScheme: theme.colorScheme.copyWith(
+                      primary: _resolvedMainColor(theme),
+                    ),
                   ),
-                  pages: controller.bottomPages,
-                  layout: controller.bottomNavLayout.value,
-                  centerPageId: controller.bottomNavCenterPageId.value,
-                  selectedPageId: controller.selectedPageId.value,
-                  onSelectPage: controller.selectPage,
-                  showLabels: controller.bottomNavShowLabels.value,
+                  child: BuilderBottomNavBar(
+                    key: ValueKey<String>(
+                      '${controller.bottomNavLayout.value.name}-'
+                      '${controller.bottomNavCenterPageId.value ?? 'none'}-'
+                      '${controller.bottomNavShowLabels.value}',
+                    ),
+                    pages: controller.bottomPages,
+                    layout: controller.bottomNavLayout.value,
+                    centerPageId: controller.bottomNavCenterPageId.value,
+                    selectedPageId: controller.selectedPageId.value,
+                    onSelectPage: controller.selectPage,
+                    showLabels: controller.bottomNavShowLabels.value,
+                  ),
                 ),
               )
               : null,
@@ -199,21 +206,32 @@ class _BuilderShell extends StatelessWidget {
         })
         .toList(growable: false);
 
+    final DrawerNavLayoutType layout = controller.drawerNavLayout.value;
+    final bool themedBackground = layout == DrawerNavLayoutType.themeBackground;
     return Drawer(
+      backgroundColor: themedBackground ? _themeBackgroundBase(theme) : null,
       child: SafeArea(
         child: ListView(
           padding: EdgeInsets.zero,
           children: <Widget>[
             DrawerHeader(
               decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer,
+                color:
+                    themedBackground
+                        ? _themeBackgroundActiveColor(
+                          _themeBackgroundBase(theme),
+                        )
+                        : theme.colorScheme.primaryContainer,
               ),
               child: Align(
                 alignment: Alignment.bottomLeft,
                 child: Text(
                   AppConstants.appName,
                   style: theme.textTheme.titleLarge?.copyWith(
-                    color: theme.colorScheme.onPrimaryContainer,
+                    color:
+                        themedBackground
+                            ? Colors.white
+                            : theme.colorScheme.onPrimaryContainer,
                   ),
                 ),
               ),
@@ -265,16 +283,22 @@ class _BuilderShell extends StatelessWidget {
         data: theme.copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           initiallyExpanded: isSelected || selectedDescendant,
-          leading: Icon(AppIconRegistry.iconOf(page.iconName)),
+          leading: Icon(
+            AppIconRegistry.iconOf(page.iconName),
+            color: _tileForeground(theme, layout, isSelected),
+          ),
           title: Text(
             page.name,
             style:
-                layout == DrawerNavLayoutType.pillGradient
+                layout == DrawerNavLayoutType.pillGradient ||
+                        layout == DrawerNavLayoutType.themeBackground
                     ? TextStyle(
                       fontSize: _kDrawerItemFontSize,
                       color:
                           isSelected
-                              ? theme.colorScheme.onPrimary
+                              ? Colors.white
+                              : layout == DrawerNavLayoutType.themeBackground
+                              ? Colors.white
                               : theme.colorScheme.onSurface,
                       fontWeight:
                           isSelected ? FontWeight.w700 : FontWeight.w500,
@@ -427,6 +451,41 @@ class _BuilderShell extends StatelessWidget {
             ),
           ),
         );
+      case DrawerNavLayoutType.themeBackground:
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 8 + depthPadding.left,
+            right: 8,
+            top: 3,
+            bottom: 3,
+          ),
+          child: ListTile(
+            leading: Icon(
+              AppIconRegistry.iconOf(page.iconName),
+              color: isSelected ? Colors.white : Colors.white,
+            ),
+            title: Text(
+              page.name,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontSize: _kDrawerItemFontSize,
+                color: isSelected ? Colors.white : Colors.white,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+            selected: isSelected,
+            selectedTileColor: _themeBackgroundActiveColor(
+              _themeBackgroundBase(theme),
+            ),
+            selectedColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            onTap: () {
+              Navigator.of(context).maybePop();
+              controller.selectPage(page.id);
+            },
+          ),
+        );
     }
   }
 
@@ -463,10 +522,14 @@ class _BuilderShell extends StatelessWidget {
         return null;
       case DrawerNavLayoutType.softCard:
         return isSelected
-            ? theme.colorScheme.secondaryContainer.withValues(alpha: 0.55)
+            ? theme.colorScheme.secondaryContainer.withValues(alpha: 0.1)
             : null;
       case DrawerNavLayoutType.pillGradient:
         return isSelected ? theme.colorScheme.primary : null;
+      case DrawerNavLayoutType.themeBackground:
+        return isSelected
+            ? _themeBackgroundActiveColor(_themeBackgroundBase(theme))
+            : Colors.white.withValues(alpha: 0.06);
     }
   }
 
@@ -488,6 +551,8 @@ class _BuilderShell extends StatelessWidget {
         return isSelected
             ? theme.colorScheme.onPrimary
             : theme.colorScheme.onSurface;
+      case DrawerNavLayoutType.themeBackground:
+        return Colors.white;
     }
   }
 
@@ -510,6 +575,29 @@ class _BuilderShell extends StatelessWidget {
           top: 4,
           bottom: 4,
         );
+      case DrawerNavLayoutType.themeBackground:
+        return EdgeInsets.only(
+          left: 8 + depthLeft,
+          right: 8,
+          top: 3,
+          bottom: 3,
+        );
     }
   }
+}
+
+Color _themeBackgroundBase(ThemeData theme) {
+  return theme.colorScheme.primary;
+}
+
+Color _themeBackgroundActiveColor(Color base) {
+  return Color.alphaBlend(Colors.white.withValues(alpha: 0.26), base);
+}
+
+Color _resolvedMainColor(ThemeData theme) {
+  final Color base = theme.colorScheme.primary;
+  if (theme.brightness != Brightness.dark) {
+    return base;
+  }
+  return Color.alphaBlend(Colors.white.withValues(alpha: 0.50), base);
 }

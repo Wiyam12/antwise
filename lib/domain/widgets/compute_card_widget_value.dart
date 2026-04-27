@@ -31,7 +31,6 @@ String cardEffectiveDisplayFormula({
   final String qualified = _formulaQualifiedTableColumn(table.name, column.name);
   switch (column.type) {
     case TableColumnType.number:
-    case TableColumnType.currency:
     case TableColumnType.formula:
       return 'SUM($qualified)';
     default:

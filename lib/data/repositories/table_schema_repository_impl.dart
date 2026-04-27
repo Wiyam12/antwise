@@ -3,8 +3,10 @@ import 'package:antwise/data/models/hive/table_schema_hive_model.dart';
 import 'package:antwise/domain/entities/product_display_mode.dart';
 import 'package:antwise/domain/entities/table_column_dropdown_source.dart';
 import 'package:antwise/domain/entities/table_column_entity.dart';
+import 'package:antwise/domain/entities/table_text_validation_kind.dart';
 import 'package:antwise/domain/entities/table_column_type.dart';
 import 'package:antwise/domain/entities/table_data_loading_mode.dart';
+import 'package:antwise/domain/entities/table_affecting_config.dart';
 import 'package:antwise/domain/entities/table_kind.dart';
 import 'package:antwise/domain/entities/table_layout_type.dart';
 import 'package:antwise/domain/entities/table_list_design_layout.dart';
@@ -95,6 +97,25 @@ class TableSchemaRepositoryImpl implements TableSchemaRepository {
             ),
             dropdownSourceTableId: raw['dropdownSourceTableId']?.toString(),
             dropdownSourceColumnId: raw['dropdownSourceColumnId']?.toString(),
+            textFieldHint: raw['textFieldHint']?.toString(),
+            textPrefixIconKey: raw['textPrefixIconKey']?.toString(),
+            textSuffixIconKey: raw['textSuffixIconKey']?.toString(),
+            textValidationKind: TableTextValidationKind.fromStorage(
+              raw['textValidationKind']?.toString(),
+            ),
+            textCustomRegex: raw['textCustomRegex']?.toString(),
+            numberFieldHint: raw['numberFieldHint']?.toString(),
+            numberPrefixText: raw['numberPrefixText']?.toString(),
+            numberSuffixText: raw['numberSuffixText']?.toString(),
+            numberPrefixIconKey: raw['numberPrefixIconKey']?.toString(),
+            numberSuffixIconKey: raw['numberSuffixIconKey']?.toString(),
+            numberMinValue: (raw['numberMinValue'] as num?)?.toDouble(),
+            numberMaxValue: (raw['numberMaxValue'] as num?)?.toDouble(),
+            numberAllowDecimals: raw['numberAllowDecimals'] as bool? ?? true,
+            numberIntegerOnly: raw['numberIntegerOnly'] as bool? ?? false,
+            numberPositiveOnly: raw['numberPositiveOnly'] as bool? ?? false,
+            numberShowStepper: raw['numberShowStepper'] as bool? ?? false,
+            numberStepValue: (raw['numberStepValue'] as num?)?.toDouble() ?? 1,
           );
         })
         .toList(growable: false);
@@ -115,6 +136,13 @@ class TableSchemaRepositoryImpl implements TableSchemaRepository {
             : TableInventoryDeductionConfig.tryFromJson(
               model.inventoryDeduction,
             );
+    final List<TableAffectingConfig> affectingTables =
+        (model.affectingTables ?? const <Map<String, dynamic>>[])
+            .map(
+              (Map<String, dynamic> raw) => TableAffectingConfig.tryFromJson(raw),
+            )
+            .whereType<TableAffectingConfig>()
+            .toList(growable: false);
     return TableSchemaEntity(
       id: model.id,
       pageId: model.pageId,
@@ -132,6 +160,7 @@ class TableSchemaRepositoryImpl implements TableSchemaRepository {
       tableKind: kind,
       summaryConfig: summary,
       inventoryDeduction: inventory,
+      affectingTables: affectingTables,
       searchEnabled: model.searchEnabled,
       dataLoadingMode: TableDataLoadingMode.fromStorage(model.dataLoadingMode),
       pageSize: model.pageSize,
@@ -158,6 +187,23 @@ class TableSchemaRepositoryImpl implements TableSchemaRepository {
             'dropdownSourceKind': c.dropdownSourceKind.storageValue,
             'dropdownSourceTableId': c.dropdownSourceTableId,
             'dropdownSourceColumnId': c.dropdownSourceColumnId,
+            'textFieldHint': c.textFieldHint,
+            'textPrefixIconKey': c.textPrefixIconKey,
+            'textSuffixIconKey': c.textSuffixIconKey,
+            'textValidationKind': c.textValidationKind.storageValue,
+            'textCustomRegex': c.textCustomRegex,
+            'numberFieldHint': c.numberFieldHint,
+            'numberPrefixText': c.numberPrefixText,
+            'numberSuffixText': c.numberSuffixText,
+            'numberPrefixIconKey': c.numberPrefixIconKey,
+            'numberSuffixIconKey': c.numberSuffixIconKey,
+            'numberMinValue': c.numberMinValue,
+            'numberMaxValue': c.numberMaxValue,
+            'numberAllowDecimals': c.numberAllowDecimals,
+            'numberIntegerOnly': c.numberIntegerOnly,
+            'numberPositiveOnly': c.numberPositiveOnly,
+            'numberShowStepper': c.numberShowStepper,
+            'numberStepValue': c.numberStepValue,
           },
         )
         .toList(growable: false);
@@ -176,6 +222,9 @@ class TableSchemaRepositoryImpl implements TableSchemaRepository {
       tableKind: schema.tableKind.storageValue,
       summaryConfig: schema.summaryConfig?.toJson(),
       inventoryDeduction: schema.inventoryDeduction?.toJson(),
+      affectingTables: schema.affectingTables
+          .map((TableAffectingConfig config) => config.toJson())
+          .toList(growable: false),
       searchEnabled: schema.searchEnabled,
       dataLoadingMode: schema.dataLoadingMode.storageValue,
       pageSize: schema.pageSize,

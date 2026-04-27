@@ -19,15 +19,41 @@ class TableFormulaEvaluator {
       return Map<String, dynamic>.from(row.values);
     }
     final int childDepth = remainingDepth - 1;
-    final Map<String, dynamic> working =
-        Map<String, dynamic>.from(row.values);
+    final Map<String, dynamic> working = <String, dynamic>{};
+    final Map<String, String> readOnlyFormulaByColumnId = <String, String>{};
+    for (final MapEntry<String, dynamic> entry in row.values.entries) {
+      final dynamic raw = entry.value;
+      final _ReadOnlyCellMeta? meta = _ReadOnlyCellMeta.tryParse(raw);
+      if (meta == null) {
+        working[entry.key] = raw;
+        continue;
+      }
+      if (meta.type == _ReadOnlyCellMetaType.manual) {
+        working[entry.key] = meta.value;
+        continue;
+      }
+      if (meta.type == _ReadOnlyCellMetaType.formula) {
+        working[entry.key] = meta.expression;
+        readOnlyFormulaByColumnId[entry.key] = meta.expression;
+        continue;
+      }
+      if (meta.type == _ReadOnlyCellMetaType.lookup) {
+        working[entry.key] = _resolveLookupMetaValue(
+          meta: meta,
+          allSchemas: allSchemas,
+          rowsByTableId: rowsByTableId,
+          remainingDepth: childDepth,
+        );
+      }
+    }
     final List<TableColumnEntity> formulaCols = schema.columns
         .where((TableColumnEntity c) => c.type == TableColumnType.formula)
         .toList(growable: false);
-    if (formulaCols.isEmpty) {
+    if (formulaCols.isEmpty && readOnlyFormulaByColumnId.isEmpty) {
       return working;
     }
-    final int maxPasses = formulaCols.length + 2;
+    final int maxPasses =
+        formulaCols.length + readOnlyFormulaByColumnId.length + 2;
     for (int pass = 0; pass < maxPasses; pass++) {
       bool changed = false;
       for (final TableColumnEntity col in formulaCols) {
@@ -50,11 +76,69 @@ class TableFormulaEvaluator {
           changed = true;
         }
       }
+      for (final MapEntry<String, String> entry
+          in readOnlyFormulaByColumnId.entries) {
+        final String computed = evaluate(
+          formula: entry.value,
+          currentSchema: schema,
+          workingRowByColId: working,
+          allSchemas: allSchemas,
+          rowsByTableId: rowsByTableId,
+          forColumnId: entry.key,
+          remainingDepth: childDepth,
+        );
+        final String old = working[entry.key]?.toString() ?? '';
+        if (old != computed) {
+          working[entry.key] = computed;
+          changed = true;
+        }
+      }
       if (!changed) {
         break;
       }
     }
     return working;
+  }
+
+  static String _resolveLookupMetaValue({
+    required _ReadOnlyCellMeta meta,
+    required List<TableSchemaEntity> allSchemas,
+    required Map<String, List<TableRowEntity>> rowsByTableId,
+    required int remainingDepth,
+  }) {
+    final String? sourceTableId = meta.sourceTableId;
+    final String? sourceColumnId = meta.sourceColumnId;
+    if (sourceTableId == null ||
+        sourceTableId.isEmpty ||
+        sourceColumnId == null ||
+        sourceColumnId.isEmpty) {
+      return '';
+    }
+    TableSchemaEntity? sourceSchema;
+    for (final TableSchemaEntity schema in allSchemas) {
+      if (schema.id == sourceTableId) {
+        sourceSchema = schema;
+        break;
+      }
+    }
+    if (sourceSchema == null) {
+      return '';
+    }
+    final List<TableRowEntity> sourceRows =
+        rowsByTableId[sourceSchema.id] ?? const <TableRowEntity>[];
+    if (sourceRows.isEmpty) {
+      return '';
+    }
+    final TableRowEntity firstRow = sourceRows.first;
+    final Map<String, dynamic> resolved = resolveRowValues(
+      schema: sourceSchema,
+      row: firstRow,
+      allSchemas: allSchemas,
+      rowsByTableId: rowsByTableId,
+      remainingDepth: remainingDepth,
+    );
+    return (resolved[sourceColumnId] ?? firstRow.values[sourceColumnId] ?? '')
+        .toString();
   }
 
   static String evaluate({
@@ -96,6 +180,52 @@ class TableFormulaEvaluator {
       return v.toString();
     }
     return v.toString();
+  }
+}
+
+enum _ReadOnlyCellMetaType { manual, formula, lookup }
+
+class _ReadOnlyCellMeta {
+  const _ReadOnlyCellMeta._({
+    required this.type,
+    this.value = '',
+    this.expression = '',
+    this.sourceTableId,
+    this.sourceColumnId,
+  });
+
+  final _ReadOnlyCellMetaType type;
+  final String value;
+  final String expression;
+  final String? sourceTableId;
+  final String? sourceColumnId;
+
+  static _ReadOnlyCellMeta? tryParse(dynamic raw) {
+    if (raw is! Map) {
+      return null;
+    }
+    final Map<String, dynamic> map = raw.cast<String, dynamic>();
+    final String type = (map['type'] ?? '').toString().trim().toLowerCase();
+    if (type == 'manual') {
+      return _ReadOnlyCellMeta._(
+        type: _ReadOnlyCellMetaType.manual,
+        value: (map['value'] ?? '').toString(),
+      );
+    }
+    if (type == 'formula') {
+      return _ReadOnlyCellMeta._(
+        type: _ReadOnlyCellMetaType.formula,
+        expression: (map['expression'] ?? '').toString(),
+      );
+    }
+    if (type == 'lookup' || type == 'auto') {
+      return _ReadOnlyCellMeta._(
+        type: _ReadOnlyCellMetaType.lookup,
+        sourceTableId: map['sourceTableId']?.toString(),
+        sourceColumnId: map['sourceColumnId']?.toString(),
+      );
+    }
+    return null;
   }
 }
 
@@ -196,7 +326,7 @@ class _Lexer {
       } else if (c == 44) {
         out.add(const _Token(_Tk.comma, ','));
         _i++;
-      } else if (c == 34) {
+      } else if (_isQuoteChar(c)) {
         out.add(_Token(_Tk.string, _readString()));
       } else if (_isDigit(c) || (c == 46 && _peekDigit())) {
         out.add(_Token(_Tk.number, _readNumber()));
@@ -214,11 +344,12 @@ class _Lexer {
       _i + 1 < input.length && _isDigit(input.codeUnitAt(_i + 1));
 
   String _readString() {
+    final int openingQuote = input.codeUnitAt(_i);
     _i++;
     final StringBuffer b = StringBuffer();
     while (_i < input.length) {
       final int c = input.codeUnitAt(_i);
-      if (c == 34) {
+      if (_isMatchingClosingQuote(openingQuote, c)) {
         _i++;
         return b.toString();
       }
@@ -257,6 +388,15 @@ class _Lexer {
       (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95;
 
   static bool _isIdentCont(int c) => _isIdentStart(c) || _isDigit(c);
+
+  static bool _isQuoteChar(int c) => c == 34 || c == 8220 || c == 8221;
+
+  static bool _isMatchingClosingQuote(int openingQuote, int currentQuote) {
+    if (openingQuote == 34) {
+      return currentQuote == 34;
+    }
+    return currentQuote == 8220 || currentQuote == 8221 || currentQuote == 34;
+  }
 }
 
 class _EvalParser {
@@ -491,6 +631,7 @@ class _EvalParser {
     }
     final List<TableRowEntity> rows =
         rowsByTableId[target.id] ?? <TableRowEntity>[];
+    final List<String> matched = <String>[];
     for (final TableRowEntity r in rows) {
       final Map<String, dynamic> resolved =
           TableFormulaEvaluator.resolveRowValues(
@@ -502,10 +643,24 @@ class _EvalParser {
       );
       final String cell = resolved[lookupId]?.toString() ?? '';
       if (cell == needle) {
-        return resolved[returnId]?.toString() ?? '';
+        matched.add((resolved[returnId] ?? '').toString());
       }
     }
-    return '';
+    if (matched.isEmpty) {
+      return '';
+    }
+    if (matched.length == 1) {
+      return matched.first;
+    }
+    final List<double> nums = <double>[];
+    for (final String value in matched) {
+      final double? parsed = double.tryParse(value.trim());
+      if (parsed == null) {
+        return matched.first;
+      }
+      nums.add(parsed);
+    }
+    return nums.reduce((double a, double b) => a + b);
   }
 
   dynamic _runAggregate(_Agg kind, String tablePart, String colPart) {

@@ -6,6 +6,7 @@ import 'package:antwise/domain/entities/builder_widget_entity.dart';
 import 'package:antwise/domain/entities/card_widget_layout.dart';
 import 'package:antwise/domain/entities/table_column_entity.dart';
 import 'package:antwise/domain/entities/table_column_type.dart';
+import 'package:antwise/domain/entities/table_text_validation_kind.dart';
 import 'package:antwise/domain/entities/product_display_mode.dart';
 import 'package:antwise/domain/entities/table_data_loading_mode.dart';
 import 'package:antwise/domain/entities/table_layout_type.dart';
@@ -19,6 +20,7 @@ import 'package:antwise/domain/summary/compute_summary_table_rows.dart';
 import 'package:antwise/domain/formula/table_formula_evaluator.dart';
 import 'package:antwise/domain/usecases/get_all_table_schemas_usecase.dart';
 import 'package:antwise/domain/widgets/compute_card_widget_value.dart';
+import 'package:antwise/domain/usecases/apply_affecting_tables_usecase.dart';
 import 'package:antwise/domain/usecases/apply_inventory_deduction_usecase.dart';
 import 'package:antwise/domain/usecases/delete_table_row_usecase.dart';
 import 'package:antwise/domain/usecases/get_builder_widgets_by_page_usecase.dart';
@@ -28,6 +30,7 @@ import 'package:antwise/domain/usecases/get_table_schema_by_page_usecase.dart';
 import 'package:antwise/domain/usecases/save_table_row_usecase.dart';
 import 'package:antwise/domain/usecases/update_table_row_usecase.dart';
 import 'package:antwise/presentation/bindings/builder_page_runtime_deps.dart';
+import 'package:antwise/presentation/controllers/home_controller.dart';
 import 'package:antwise/presentation/widgets/searchable_dropdown_options_field.dart';
 import 'package:antwise/presentation/widgets/table_row_modal_field_helpers.dart';
 import 'package:file_picker/file_picker.dart';
@@ -41,6 +44,41 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
+TextInputType _textColumnKeyboard(TableTextValidationKind k) {
+  return switch (k) {
+    TableTextValidationKind.email => TextInputType.emailAddress,
+    TableTextValidationKind.phone => TextInputType.phone,
+    _ => TextInputType.text,
+  };
+}
+
+Widget? _textColumnSuffixIcon(
+  TableColumnEntity col,
+  bool passwordFieldObscured,
+  VoidCallback onTogglePasswordVisibility,
+) {
+  final bool isPwd = col.textValidationKind == TableTextValidationKind.password;
+  final String? sk = col.textSuffixIconKey;
+  if (isPwd) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        IconButton(
+          icon: Icon(
+            passwordFieldObscured ? Icons.visibility : Icons.visibility_off,
+          ),
+          onPressed: onTogglePasswordVisibility,
+        ),
+        if (sk != null && sk.isNotEmpty) Icon(AppIconRegistry.iconOf(sk)),
+      ],
+    );
+  }
+  if (sk != null && sk.isNotEmpty) {
+    return Icon(AppIconRegistry.iconOf(sk));
+  }
+  return null;
+}
+
 /// Column id seeded for Contact list layout ([CreateTableController.idContactAvatar]).
 const String _kContactListAvatarColumnId = 'contact_avatar';
 
@@ -50,11 +88,414 @@ const String _kEmptyCellDisplay = '-';
 String _tableLayoutKey(String tableId) => 'table:$tableId';
 String _chartLayoutKey(String widgetId) => 'chart:$widgetId';
 
+/// Compact, non-interactive table preview tile for layout pickers.
+class TableLayoutOptionPreview extends StatelessWidget {
+  const TableLayoutOptionPreview({
+    super.key,
+    required this.layout,
+    this.productDisplayMode = ProductDisplayMode.list,
+  });
+
+  final TableListDesignLayout layout;
+  final ProductDisplayMode productDisplayMode;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final Widget rowPreview = switch (layout) {
+      TableListDesignLayout.contact => _contactPreview(theme),
+      TableListDesignLayout.product => _productPreview(theme),
+      TableListDesignLayout.standard => _standardPreview(theme),
+    };
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerLowest,
+          border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: 0.7),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _tableShellHeader(theme),
+              const SizedBox(height: 6),
+              _tableShellSearch(theme),
+              const SizedBox(height: 6),
+              Expanded(
+                child: ClipRect(
+                  child: SingleChildScrollView(
+                    physics: const NeverScrollableScrollPhysics(),
+                    child: rowPreview,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              _tableShellFooter(theme),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _tableShellHeader(ThemeData theme) {
+    final String title = switch (layout) {
+      TableListDesignLayout.contact => 'Contacts',
+      TableListDesignLayout.product => 'Products',
+      TableListDesignLayout.standard => 'Inventory',
+    };
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Text(
+            title,
+            style: theme.textTheme.titleSmall,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        FilledButton.icon(
+          onPressed: () {},
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            minimumSize: const Size(0, 26),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+            textStyle: theme.textTheme.labelSmall,
+          ),
+          icon: const Icon(Icons.add, size: 14),
+          label: const Text('Add'),
+        ),
+      ],
+    );
+  }
+
+  Widget _tableShellSearch(ThemeData theme) {
+    return SizedBox(
+      height: 28,
+      child: TextField(
+        enabled: false,
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: 'Search...',
+          hintStyle: theme.textTheme.labelSmall,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 6,
+          ),
+          prefixIcon: const Icon(Icons.search, size: 14),
+          prefixIconConstraints: const BoxConstraints(
+            minWidth: 24,
+            minHeight: 24,
+          ),
+          border: const OutlineInputBorder(),
+        ),
+      ),
+    );
+  }
+
+  Widget _tableShellFooter(ThemeData theme) {
+    return Row(
+      children: <Widget>[
+        Text(
+          'Total: 1',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const Spacer(),
+        Icon(
+          Icons.chevron_left,
+          size: 14,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primaryContainer,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text('1', style: theme.textTheme.labelSmall),
+        ),
+        Icon(
+          Icons.chevron_right,
+          size: 14,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ],
+    );
+  }
+
+  Widget _contactPreview(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: theme.colorScheme.primaryContainer,
+                  child: Icon(
+                    Icons.person,
+                    size: 18,
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'Jane Cooper',
+                        style: theme.textTheme.titleSmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Product Team',
+                        style: theme.textTheme.bodySmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                _previewRowActions(theme),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _productPreview(ThemeData theme) {
+    if (productDisplayMode == ProductDisplayMode.grid) {
+      return SizedBox(
+        height: 110,
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: _productGridTile(
+                theme,
+                name: 'Headphones',
+                price: '\$129',
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: _productGridTile(theme, name: 'Keyboard', price: '\$89'),
+            ),
+          ],
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: ColoredBox(
+                      color: theme.colorScheme.primaryContainer,
+                      child: Icon(
+                        Icons.image_outlined,
+                        size: 18,
+                        color: theme.colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'Premium Headphones',
+                        style: theme.textTheme.titleSmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        '\$129',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                _previewRowActions(theme),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _productGridTile(
+    ThemeData theme, {
+    required String name,
+    required String price,
+  }) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            SizedBox.square(
+              dimension: 70,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Center(
+                  child: Icon(
+                    Icons.image_outlined,
+                    size: 14,
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              price,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _standardPreview(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    children: <Widget>[
+                      _kvRow(theme, 'Code', 'INV-001'),
+                      _kvRow(theme, 'Name', 'Cable'),
+                      _kvRow(theme, 'Qty', '24'),
+                    ],
+                  ),
+                ),
+                _previewRowActions(theme),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _previewRowActions(ThemeData theme) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+          onPressed: () {},
+          icon: const Icon(Icons.edit_outlined, size: 16),
+        ),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+          onPressed: () {},
+          icon: const Icon(Icons.delete_outline, size: 16),
+        ),
+      ],
+    );
+  }
+
+  Widget _kvRow(ThemeData theme, String key, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              key,
+              style: theme.textTheme.bodySmall,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: theme.textTheme.bodySmall,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class DynamicBuilderPageBody extends StatefulWidget {
   const DynamicBuilderPageBody({
     super.key,
     required this.page,
     this.contentRevision = 0,
+    this.showNestedChildShell = true,
   });
 
   final BuilderPageEntity page;
@@ -62,6 +503,10 @@ class DynamicBuilderPageBody extends StatefulWidget {
   /// Bumps when tables/widgets are saved elsewhere so this body refetches schemas
   /// (e.g. [HomeController.refreshBuilderPageContent]).
   final int contentRevision;
+
+  /// When false, this page never acts as a tab host for its child pages (used for
+  /// the "root" tab that shows the parent's own widgets/tables).
+  final bool showNestedChildShell;
 
   @override
   State<DynamicBuilderPageBody> createState() => _DynamicBuilderPageBodyState();
@@ -75,6 +520,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
   late final GetTableSchemaByPageUseCase _getSchemaByPage = Get.find();
   late final GetTableRowsUseCase _getRows = Get.find();
   late final SaveTableRowUseCase _saveRow = Get.find();
+  late final ApplyAffectingTablesUseCase _applyAffectingTables = Get.find();
   late final ApplyInventoryDeductionUseCase _applyInventoryDeduction =
       Get.find();
   late final UpdateTableRowUseCase _updateRow = Get.find();
@@ -97,6 +543,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
   final Map<String, int> _tableVisibleCounts = <String, int>{};
   final Map<String, int> _tableCurrentPages = <String, int>{};
   final Map<String, int> _tablePageSizes = <String, int>{};
+  final Map<String, int> _touchedPieIndexByChartId = <String, int>{};
   bool _isLoading = true;
 
   /// Caches [TableFormulaEvaluator.resolveRowValues] per row for list builds.
@@ -118,7 +565,8 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
     // Reload when the page instance changes, table metadata changes (revision),
     // or widget/table order updates from settings.
     if (oldWidget.page != widget.page ||
-        oldWidget.contentRevision != widget.contentRevision) {
+        oldWidget.contentRevision != widget.contentRevision ||
+        oldWidget.showNestedChildShell != widget.showNestedChildShell) {
       _load();
     }
   }
@@ -155,21 +603,9 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
         rowsByTable[schema.id] = <TableRowEntity>[];
         continue;
       }
-      TableSchemaEntity? source;
-      for (final TableSchemaEntity s in allSchemas) {
-        if (s.id == sid) {
-          source = s;
-          break;
-        }
-      }
-      if (source == null) {
-        rowsByTable[schema.id] = <TableRowEntity>[];
-        continue;
-      }
       rowsByTable[schema.id] = computeSummaryTableRows(
         summarySchema: schema,
-        sourceSchema: source,
-        sourceRows: rowsByTable[sid] ?? <TableRowEntity>[],
+        rowsByTableId: rowsByTable,
       );
     }
 
@@ -573,6 +1009,14 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       }
     }
 
+    final Map<String, bool> textPasswordObscured = <String, bool>{};
+    for (final TableColumnEntity c in columns) {
+      if (c.type == TableColumnType.text &&
+          c.textValidationKind == TableTextValidationKind.password) {
+        textPasswordObscured[c.id] = true;
+      }
+    }
+
     final Map<String, String?> fieldErrors = <String, String?>{};
     dynamic currentDraftValue(TableColumnEntity col) {
       return switch (col.type) {
@@ -646,7 +1090,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    Text(isEdit ? 'Edit Record' : 'Add Record'),
+                    Text(isEdit ? 'Edit' : 'Add'),
                     const SizedBox(height: 12),
                     Flexible(
                       child: ListView(
@@ -765,26 +1209,35 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                                       },
                                     );
                                   })(),
-                                TableColumnType.number ||
-                                TableColumnType.currency => TextField(
-                                  controller: textCtrls[col.id],
-                                  decoration: InputDecoration(
-                                    labelText: col.name,
-                                  ),
-                                  keyboardType:
-                                      const TextInputType.numberWithOptions(
-                                        decimal: true,
-                                        signed: false,
-                                      ),
-                                  inputFormatters: const <TextInputFormatter>[
-                                    DecimalNumericInputFormatter(),
-                                  ],
-                                  onChanged: (_) {
-                                    setModalState(() {
+                                TableColumnType.number =>
+                                  (() {
+                                    final TextEditingController ctrl =
+                                        textCtrls[col.id]!;
+                                    final bool allowDecimals =
+                                        col.numberIntegerOnly
+                                            ? false
+                                            : col.numberAllowDecimals;
+                                    final bool positiveOnly =
+                                        col.numberPositiveOnly;
+                                    final List<TextInputFormatter> formatters =
+                                        <TextInputFormatter>[
+                                          FilteringTextInputFormatter.allow(
+                                            allowDecimals
+                                                ? (positiveOnly
+                                                    ? RegExp(r'^\d*\.?\d*$')
+                                                    : RegExp(
+                                                        r'^-?\d*\.?\d*$',
+                                                      ))
+                                                : (positiveOnly
+                                                    ? RegExp(r'^\d*$')
+                                                    : RegExp(r'^-?\d*$')),
+                                          ),
+                                        ];
+                                    void validateNow() {
                                       final String? msg =
                                           TableRowModalFieldValidators.validate(
                                             col: col,
-                                            textValue: textCtrls[col.id]?.text,
+                                            textValue: ctrl.text,
                                             boolValue: boolValues[col.id],
                                             dateValue: dateValues[col.id],
                                             imageValue: imageValues[col.id],
@@ -797,9 +1250,112 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                                       } else {
                                         fieldErrors[col.id] = msg;
                                       }
-                                    });
-                                  },
-                                ),
+                                    }
+
+                                    void stepBy(double delta) {
+                                      final double step =
+                                          col.numberStepValue == 0
+                                              ? 1
+                                              : col.numberStepValue.abs();
+                                      final double current =
+                                          double.tryParse(ctrl.text.trim()) ?? 0;
+                                      double next = current + delta * step;
+                                      if (col.numberPositiveOnly && next < 0) {
+                                        next = 0;
+                                      }
+                                      if (col.numberMinValue != null &&
+                                          next < col.numberMinValue!) {
+                                        next = col.numberMinValue!;
+                                      }
+                                      if (col.numberMaxValue != null &&
+                                          next > col.numberMaxValue!) {
+                                        next = col.numberMaxValue!;
+                                      }
+                                      ctrl.text =
+                                          col.numberIntegerOnly || !allowDecimals
+                                              ? next.round().toString()
+                                              : next.toString();
+                                      validateNow();
+                                    }
+
+                                    final InputDecoration decoration =
+                                        InputDecoration(
+                                          labelText: col.name,
+                                          hintText: col.numberFieldHint,
+                                          prefixIcon:
+                                              (col.numberPrefixIconKey != null &&
+                                                      col.numberPrefixIconKey!
+                                                          .isNotEmpty)
+                                                  ? Icon(
+                                                    AppIconRegistry.iconOf(
+                                                      col.numberPrefixIconKey!,
+                                                    ),
+                                                  )
+                                                  : null,
+                                          suffixIcon:
+                                              (col.numberSuffixIconKey != null &&
+                                                      col.numberSuffixIconKey!
+                                                          .isNotEmpty)
+                                                  ? Icon(
+                                                    AppIconRegistry.iconOf(
+                                                      col.numberSuffixIconKey!,
+                                                    ),
+                                                  )
+                                                  : null,
+                                          prefixText:
+                                              (col.numberPrefixIconKey == null ||
+                                                      col.numberPrefixIconKey!
+                                                          .isEmpty)
+                                                  ? col.numberPrefixText
+                                                  : null,
+                                          suffixText:
+                                              (col.numberSuffixIconKey == null ||
+                                                      col.numberSuffixIconKey!
+                                                          .isEmpty)
+                                                  ? col.numberSuffixText
+                                                  : null,
+                                        );
+
+                                    final Widget numberField = TextField(
+                                      controller: ctrl,
+                                      decoration: decoration,
+                                      keyboardType: TextInputType.numberWithOptions(
+                                        decimal: allowDecimals,
+                                        signed: !positiveOnly,
+                                      ),
+                                      inputFormatters: formatters,
+                                      onChanged: (_) {
+                                        setModalState(validateNow);
+                                      },
+                                    );
+
+                                    if (!col.numberShowStepper) {
+                                      return numberField;
+                                    }
+                                    return Row(
+                                      children: <Widget>[
+                                        OutlinedButton(
+                                          onPressed: () {
+                                            setModalState(() {
+                                              stepBy(-1);
+                                            });
+                                          },
+                                          child: const Text('-'),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(child: numberField),
+                                        const SizedBox(width: 8),
+                                        OutlinedButton(
+                                          onPressed: () {
+                                            setModalState(() {
+                                              stepBy(1);
+                                            });
+                                          },
+                                          child: const Text('+'),
+                                        ),
+                                      ],
+                                    );
+                                  })(),
                                 TableColumnType.image =>
                                   (() {
                                     final String? imagePath =
@@ -1066,6 +1622,79 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                                       ],
                                     );
                                   })(),
+                                TableColumnType.text =>
+                                  (() {
+                                    final bool isPwd =
+                                        col.textValidationKind ==
+                                        TableTextValidationKind.password;
+                                    final bool pwdObscured =
+                                        textPasswordObscured[col.id] ?? true;
+                                    final String? hk =
+                                        col.textFieldHint?.trim();
+                                    final String? pfxKey =
+                                        col.textPrefixIconKey;
+                                    return TextField(
+                                      controller: textCtrls[col.id],
+                                      obscureText: isPwd && pwdObscured,
+                                      keyboardType: _textColumnKeyboard(
+                                        col.textValidationKind,
+                                      ),
+                                      autocorrect:
+                                          col.textValidationKind !=
+                                              TableTextValidationKind.email &&
+                                          col.textValidationKind !=
+                                              TableTextValidationKind.password,
+                                      enableSuggestions:
+                                          col.textValidationKind !=
+                                          TableTextValidationKind.password,
+                                      decoration: InputDecoration(
+                                        labelText: col.name,
+                                        hintText:
+                                            (hk == null || hk.isEmpty)
+                                                ? null
+                                                : hk,
+                                        prefixIcon:
+                                            pfxKey != null && pfxKey.isNotEmpty
+                                                ? Icon(
+                                                  AppIconRegistry.iconOf(
+                                                    pfxKey,
+                                                  ),
+                                                )
+                                                : null,
+                                        suffixIcon: _textColumnSuffixIcon(
+                                          col,
+                                          pwdObscured,
+                                          () {
+                                            setModalState(() {
+                                              textPasswordObscured[col.id] =
+                                                  !pwdObscured;
+                                            });
+                                          },
+                                        ),
+                                      ),
+                                      onChanged: (_) {
+                                        setModalState(() {
+                                          final String? msg =
+                                              TableRowModalFieldValidators.validate(
+                                                col: col,
+                                                textValue:
+                                                    textCtrls[col.id]?.text,
+                                                boolValue: boolValues[col.id],
+                                                dateValue: dateValues[col.id],
+                                                imageValue: imageValues[col.id],
+                                                fileValue: fileValues[col.id],
+                                                rowsByTableForDropdown:
+                                                    _rowsByTable,
+                                              );
+                                          if (msg == null || msg.isEmpty) {
+                                            fieldErrors.remove(col.id);
+                                          } else {
+                                            fieldErrors[col.id] = msg;
+                                          }
+                                        });
+                                      },
+                                    );
+                                  })(),
                                 _ => TextField(
                                   controller: textCtrls[col.id],
                                   decoration: InputDecoration(
@@ -1201,6 +1830,16 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       await _saveRow(row);
       if (schema.tableKind != TableKind.summary) {
         try {
+          await _applyAffectingTables(
+            sourceSchema: schema,
+            configs: schema.affectingTables,
+            allSchemas: _allSchemas,
+            lineValues: values,
+          );
+        } catch (_) {
+          /* best-effort; row is already saved */
+        }
+        try {
           await _applyInventoryDeduction(
             config: schema.inventoryDeduction,
             allSchemas: _allSchemas,
@@ -1212,6 +1851,18 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       }
     } else {
       await _updateRow(row);
+      if (schema.tableKind != TableKind.summary) {
+        try {
+          await _applyAffectingTables(
+            sourceSchema: schema,
+            configs: schema.affectingTables,
+            allSchemas: _allSchemas,
+            lineValues: values,
+          );
+        } catch (_) {
+          /* best-effort; row is already updated */
+        }
+      }
     }
     await _load();
   }
@@ -1339,6 +1990,54 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
+    if (widget.showNestedChildShell && Get.isRegistered<HomeController>()) {
+      return Obx(() {
+        final HomeController home = Get.find<HomeController>();
+        home.pages.length;
+        final List<BuilderPageEntity> nestedChildren = _nestedChildPages(
+          home,
+          widget.page,
+        );
+        if (nestedChildren.isNotEmpty) {
+          final String rootLabel =
+              (widget.page.nestedRootContentTabName == null ||
+                      widget.page.nestedRootContentTabName!.trim().isEmpty)
+                  ? widget.page.name
+                  : widget.page.nestedRootContentTabName!.trim();
+          return _ParentNestedPageHost(
+            parent: widget.page,
+            children: nestedChildren,
+            contentRevision: widget.contentRevision,
+            includeParentOwnContent: true,
+            ownContentLabel: rootLabel,
+          );
+        }
+        return _buildMainPageContent(theme);
+      });
+    }
+    return _buildMainPageContent(theme);
+  }
+
+  List<BuilderPageEntity> _nestedChildPages(
+    HomeController home,
+    BuilderPageEntity parent,
+  ) {
+    final List<BuilderPageEntity> out = home.pages
+        .where(
+          (BuilderPageEntity p) =>
+              !p.isDeleted &&
+              p.parentPageId == parent.id &&
+              p.nestedDisplayType != null,
+        )
+        .toList(growable: false);
+    out.sort(
+      (BuilderPageEntity a, BuilderPageEntity b) =>
+          a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+    );
+    return out;
+  }
+
+  Widget _buildMainPageContent(ThemeData theme) {
     if (_layoutOrder.isNotEmpty) {
       return ListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -1586,13 +2285,13 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
 
     final List<TableRowEntity> rows =
         _rowsByTable[table.id] ?? <TableRowEntity>[];
-    final List<({String label, double value})> points =
-        <({String label, double value})>[];
+    final Map<String, double> groupedPoints = <String, double>{};
     for (final TableRowEntity row in rows) {
       final Map<String, dynamic> resolved = _resolvedRowValues(table, row);
-      final String label =
+      final String rawLabel =
           (resolved[xColumnId] ?? row.values[xColumnId] ?? '').toString();
-      if (label.trim().isEmpty) {
+      final String label = rawLabel.trim();
+      if (label.isEmpty) {
         continue;
       }
       double? value;
@@ -1614,8 +2313,16 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       if (value == null) {
         continue;
       }
-      points.add((label: label, value: value));
+      final double numericValue = value;
+      groupedPoints.update(
+        label,
+        (double old) => old + numericValue,
+        ifAbsent: () => numericValue,
+      );
     }
+    final List<({String label, double value})> points = groupedPoints.entries
+        .map((MapEntry<String, double> e) => (label: e.key, value: e.value))
+        .toList(growable: false);
 
     if (points.isEmpty) {
       return Card(
@@ -1655,7 +2362,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                   padding: const EdgeInsets.symmetric(horizontal: 24),
                   child: _buildLineChart(points, theme),
                 ),
-                'pie' => _buildPieChart(points, theme),
+                'pie' => _buildPieChart(points, theme, chartWidget.id),
                 _ => _buildBarChart(points, theme),
               },
             ),
@@ -1675,6 +2382,28 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       BarChartData(
         borderData: FlBorderData(show: false),
         gridData: const FlGridData(show: false),
+        barTouchData: BarTouchData(
+          enabled: true,
+          touchTooltipData: BarTouchTooltipData(
+            getTooltipItem: (
+              BarChartGroupData group,
+              int groupIndex,
+              BarChartRodData rod,
+              int rodIndex,
+            ) {
+              final int idx = group.x.toInt();
+              final String label =
+                  idx >= 0 && idx < points.length ? points[idx].label : '';
+              return BarTooltipItem(
+                '$label\n${rod.toY.toStringAsFixed(2)}',
+                const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              );
+            },
+          ),
+        ),
         titlesData: FlTitlesData(
           rightTitles: const AxisTitles(
             sideTitles: SideTitles(showTitles: false),
@@ -1731,6 +2460,29 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       LineChartData(
         borderData: FlBorderData(show: false),
         gridData: const FlGridData(show: true),
+        lineTouchData: LineTouchData(
+          enabled: true,
+          touchTooltipData: LineTouchTooltipData(
+            getTooltipItems: (List<LineBarSpot> touchedSpots) {
+              return touchedSpots
+                  .map((LineBarSpot spot) {
+                    final int idx = spot.x.toInt();
+                    final String label =
+                        idx >= 0 && idx < points.length
+                            ? points[idx].label
+                            : '';
+                    return LineTooltipItem(
+                      '$label\n${spot.y.toStringAsFixed(2)}',
+                      const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    );
+                  })
+                  .toList(growable: false);
+            },
+          ),
+        ),
         titlesData: FlTitlesData(
           rightTitles: const AxisTitles(
             sideTitles: SideTitles(showTitles: false),
@@ -1767,6 +2519,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
   Widget _buildPieChart(
     List<({String label, double value})> points,
     ThemeData theme,
+    String chartWidgetId,
   ) {
     final List<Color> palette = <Color>[
       theme.colorScheme.primary,
@@ -1776,24 +2529,127 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       theme.colorScheme.secondaryContainer,
       theme.colorScheme.tertiaryContainer,
     ];
-    return PieChart(
-      PieChartData(
-        sectionsSpace: 2,
-        centerSpaceRadius: 26,
-        sections: <PieChartSectionData>[
-          for (int i = 0; i < points.length; i++)
-            PieChartSectionData(
-              value: points[i].value <= 0 ? 0.01 : points[i].value,
-              color: palette[i % palette.length],
-              title: points[i].label,
-              radius: 74,
-              titleStyle: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onPrimary,
-                fontWeight: FontWeight.w600,
+    return Column(
+      children: <Widget>[
+        Expanded(
+          child: PieChart(
+            PieChartData(
+              sectionsSpace: 2,
+              centerSpaceRadius: 26,
+              pieTouchData: PieTouchData(
+                enabled: true,
+                touchCallback: (
+                  FlTouchEvent event,
+                  PieTouchResponse? response,
+                ) {
+                  if (!mounted) {
+                    return;
+                  }
+                  final int? idx =
+                      response?.touchedSection?.touchedSectionIndex;
+                  setState(() {
+                    if (event.isInterestedForInteractions && idx != null) {
+                      _touchedPieIndexByChartId[chartWidgetId] = idx;
+                    } else {
+                      _touchedPieIndexByChartId.remove(chartWidgetId);
+                    }
+                  });
+                },
               ),
+              sections: <PieChartSectionData>[
+                for (int i = 0; i < points.length; i++)
+                  PieChartSectionData(
+                    value: points[i].value <= 0 ? 0.01 : points[i].value,
+                    color: palette[i % palette.length],
+                    title: points[i].label,
+                    radius:
+                        _touchedPieIndexByChartId[chartWidgetId] == i ? 80 : 74,
+                    titleStyle: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    badgeWidget:
+                        _touchedPieIndexByChartId[chartWidgetId] == i
+                            ? DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.black87,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                child: Text(
+                                  '${points[i].label}\n${points[i].value.toStringAsFixed(2)}',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            )
+                            : null,
+                    badgePositionPercentageOffset: 1.3,
+                  ),
+              ],
             ),
-        ],
-      ),
+          ),
+        ),
+        const SizedBox(height: 50),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 10,
+          runSpacing: 6,
+          children: <Widget>[
+            for (int i = 0; i < points.length; i++)
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    if (_touchedPieIndexByChartId[chartWidgetId] == i) {
+                      _touchedPieIndexByChartId.remove(chartWidgetId);
+                    } else {
+                      _touchedPieIndexByChartId[chartWidgetId] = i;
+                    }
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color:
+                        _touchedPieIndexByChartId[chartWidgetId] == i
+                            ? theme.colorScheme.surfaceContainerHighest
+                            : theme.colorScheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: palette[i % palette.length],
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${points[i].label}: ${points[i].value.toStringAsFixed(2)}',
+                        style: theme.textTheme.labelSmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -2008,7 +2864,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                     FilledButton.icon(
                       onPressed: () => _createOrEditRow(schema),
                       icon: const Icon(Icons.add),
-                      label: const Text('Add Record'),
+                      label: const Text('Add'),
                     ),
                 ],
               ),
@@ -2093,7 +2949,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                           OutlinedButton.icon(
                             onPressed: () => _createOrEditRow(schema),
                             icon: const Icon(Icons.add),
-                            label: const Text('Add Record'),
+                            label: const Text('Add'),
                           ),
                         ],
                       ],
@@ -2389,7 +3245,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       if (nameCol == null && _isTextLikeColumn(c.type)) {
         nameCol = c;
       }
-      if (priceCol == null && c.type == TableColumnType.currency) {
+      if (priceCol == null && c.type == TableColumnType.number) {
         priceCol = c;
       }
     }
@@ -2430,7 +3286,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                   color:
                       price.isEmpty
                           ? theme.colorScheme.onSurfaceVariant
-                          : theme.colorScheme.primary,
+                          : _darkModeLightPrimary(theme),
                 ),
               ),
             ],
@@ -2721,7 +3577,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       if (nameCol == null && _isTextLikeColumn(c.type)) {
         nameCol = c;
       }
-      if (priceCol == null && c.type == TableColumnType.currency) {
+      if (priceCol == null && c.type == TableColumnType.number) {
         priceCol = c;
       }
     }
@@ -2809,7 +3665,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                     color:
                         price.isEmpty
                             ? theme.colorScheme.onSurfaceVariant
-                            : theme.colorScheme.primary,
+                            : _darkModeLightPrimary(theme),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -3114,4 +3970,234 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
         return Icons.attach_file;
     }
   }
+}
+
+NestedPageDisplayType _resolveNestedDisplayType(
+  List<BuilderPageEntity> children,
+) {
+  for (final BuilderPageEntity c in children) {
+    if (c.nestedDisplayType != null) {
+      return c.nestedDisplayType!;
+    }
+  }
+  return NestedPageDisplayType.tab;
+}
+
+/// Renders child pages under [parent] using tabs or a segmented control.
+class _ParentNestedPageHost extends StatefulWidget {
+  const _ParentNestedPageHost({
+    required this.parent,
+    required this.children,
+    required this.contentRevision,
+    this.includeParentOwnContent = false,
+    this.ownContentLabel = '',
+  });
+
+  final BuilderPageEntity parent;
+  final List<BuilderPageEntity> children;
+  final int contentRevision;
+  final bool includeParentOwnContent;
+  final String ownContentLabel;
+
+  @override
+  State<_ParentNestedPageHost> createState() => _ParentNestedPageHostState();
+}
+
+class _ParentNestedPageHostState extends State<_ParentNestedPageHost>
+    with TickerProviderStateMixin {
+  late TabController _tabController;
+  int _segmentIndex = 0;
+
+  int get _tabCount {
+    if (widget.children.isEmpty) {
+      return 0;
+    }
+    return widget.children.length + (widget.includeParentOwnContent ? 1 : 0);
+  }
+
+  int get _maxSegmentIndex {
+    final int c = _tabCount;
+    return c > 0 ? c - 1 : 0;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(
+      length: _tabCount < 1 ? 1 : _tabCount,
+      vsync: this,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _ParentNestedPageHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.children.length != widget.children.length ||
+        oldWidget.includeParentOwnContent != widget.includeParentOwnContent) {
+      final int newLen = _tabCount;
+      _tabController.dispose();
+      _tabController = TabController(
+        length: newLen < 1 ? 1 : newLen,
+        vsync: this,
+      );
+      if (_segmentIndex > _maxSegmentIndex) {
+        _segmentIndex = _maxSegmentIndex;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.children.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final ThemeData theme = Theme.of(context);
+    final Color activeTabColor = _activeTabColor(theme);
+    final NestedPageDisplayType displayType = _resolveNestedDisplayType(
+      widget.children,
+    );
+    if (displayType == NestedPageDisplayType.tab) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Material(
+            color: theme.colorScheme.surface,
+            child: TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              tabAlignment: TabAlignment.center,
+              labelPadding: const EdgeInsets.symmetric(horizontal: 30),
+              labelColor: activeTabColor,
+              indicatorColor: activeTabColor,
+              unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
+              tabs: <Widget>[
+                if (widget.includeParentOwnContent)
+                  Tab(
+                    text:
+                        widget.ownContentLabel.isEmpty
+                            ? widget.parent.name
+                            : widget.ownContentLabel,
+                  ),
+                for (final BuilderPageEntity c in widget.children)
+                  Tab(text: c.name),
+              ],
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: <Widget>[
+                if (widget.includeParentOwnContent)
+                  DynamicBuilderPageBody(
+                    key: ValueKey<String>('nested-root-${widget.parent.id}'),
+                    page: widget.parent,
+                    contentRevision: widget.contentRevision,
+                    showNestedChildShell: false,
+                  ),
+                for (final BuilderPageEntity c in widget.children)
+                  DynamicBuilderPageBody(
+                    key: ValueKey<String>('nested-${c.id}'),
+                    page: c,
+                    contentRevision: widget.contentRevision,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+    final int safeIndex = _segmentIndex.clamp(0, _maxSegmentIndex);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: SegmentedButton<int>(
+            showSelectedIcon: false,
+            segments: <ButtonSegment<int>>[
+              if (widget.includeParentOwnContent)
+                ButtonSegment<int>(
+                  value: 0,
+                  label: Text(
+                    widget.ownContentLabel.isEmpty
+                        ? widget.parent.name
+                        : widget.ownContentLabel,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              for (int i = 0; i < widget.children.length; i++)
+                ButtonSegment<int>(
+                  value: widget.includeParentOwnContent ? i + 1 : i,
+                  label: Text(
+                    widget.children[i].name,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+            selected: <int>{safeIndex},
+            onSelectionChanged: (Set<int> next) {
+              if (next.isEmpty) {
+                return;
+              }
+              setState(() {
+                _segmentIndex = next.first;
+              });
+            },
+          ),
+        ),
+        Expanded(child: _segmentBodyAt(safeIndex)),
+      ],
+    );
+  }
+
+  Widget _segmentBodyAt(int index) {
+    if (widget.includeParentOwnContent) {
+      if (index == 0) {
+        return DynamicBuilderPageBody(
+          key: ValueKey<String>('nested-seg-root-${widget.parent.id}'),
+          page: widget.parent,
+          contentRevision: widget.contentRevision,
+          showNestedChildShell: false,
+        );
+      }
+      final BuilderPageEntity c = widget.children[index - 1];
+      return DynamicBuilderPageBody(
+        key: ValueKey<String>('nested-seg-${c.id}'),
+        page: c,
+        contentRevision: widget.contentRevision,
+      );
+    }
+    final BuilderPageEntity c = widget.children[index];
+    return DynamicBuilderPageBody(
+      key: ValueKey<String>('nested-seg-${c.id}'),
+      page: c,
+      contentRevision: widget.contentRevision,
+    );
+  }
+}
+
+Color _activeTabColor(ThemeData theme) {
+  if (theme.brightness != Brightness.dark) {
+    return theme.colorScheme.primary;
+  }
+  return Color.alphaBlend(
+    Colors.white.withValues(alpha: 0.22),
+    theme.colorScheme.primary,
+  );
+}
+
+Color _darkModeLightPrimary(ThemeData theme) {
+  if (theme.brightness != Brightness.dark) {
+    return theme.colorScheme.primary;
+  }
+  return Color.alphaBlend(
+    Colors.white.withValues(alpha: 0.42),
+    theme.colorScheme.primary,
+  );
 }

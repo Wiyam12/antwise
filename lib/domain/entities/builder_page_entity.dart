@@ -1,3 +1,25 @@
+/// How child pages are shown when a parent page is opened (siblings use the same value).
+enum NestedPageDisplayType {
+  tab,
+  segmented;
+
+  static NestedPageDisplayType? tryFromStorage(String? value) {
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+    return switch (value) {
+      'tab' => NestedPageDisplayType.tab,
+      'segmented' => NestedPageDisplayType.segmented,
+      _ => null,
+    };
+  }
+
+  String get storageValue => switch (this) {
+    NestedPageDisplayType.tab => 'tab',
+    NestedPageDisplayType.segmented => 'segmented',
+  };
+}
+
 /// User-defined page metadata for the no-code builder.
 class BuilderPageEntity {
   const BuilderPageEntity({
@@ -7,7 +29,10 @@ class BuilderPageEntity {
     required this.showInDrawer,
     this.isDeleted = false,
     this.iconName = 'article_outlined',
+    this.isDrawerParentContainer = false,
     this.parentPageId,
+    this.nestedDisplayType,
+    this.nestedRootContentTabName,
     this.widgetGridCount = 1,
     this.layoutOrder = const <String>[],
     this.widgetOrder = const <String>[],
@@ -22,8 +47,20 @@ class BuilderPageEntity {
   /// Persisted Material icon key (snake_case), e.g. article_outlined.
   final String iconName;
 
+  /// True when this node is a drawer grouping container (folder), not a
+  /// navigable content page.
+  final bool isDrawerParentContainer;
+
   /// Optional parent page id when this page is a drawer child item.
   final String? parentPageId;
+
+  /// When [parentPageId] is set, how the parent should present sibling child pages
+  /// (tab bar vs segmented control). Null for standalone or legacy pages.
+  final NestedPageDisplayType? nestedDisplayType;
+
+  /// When this page is a tab/segment host and still has its own builder content,
+  /// label for the first tab (that content). Null = use [name].
+  final String? nestedRootContentTabName;
 
   /// Number of cards per row for the grouped widgets block (1..3).
   final int widgetGridCount;
@@ -43,7 +80,10 @@ class BuilderPageEntity {
     bool? showInDrawer,
     bool? isDeleted,
     String? iconName,
+    bool? isDrawerParentContainer,
     String? parentPageId,
+    NestedPageDisplayType? nestedDisplayType,
+    String? nestedRootContentTabName,
     int? widgetGridCount,
     List<String>? layoutOrder,
     List<String>? widgetOrder,
@@ -55,7 +95,12 @@ class BuilderPageEntity {
       showInDrawer: showInDrawer ?? this.showInDrawer,
       isDeleted: isDeleted ?? this.isDeleted,
       iconName: iconName ?? this.iconName,
+      isDrawerParentContainer:
+          isDrawerParentContainer ?? this.isDrawerParentContainer,
       parentPageId: parentPageId ?? this.parentPageId,
+      nestedDisplayType: nestedDisplayType ?? this.nestedDisplayType,
+      nestedRootContentTabName:
+          nestedRootContentTabName ?? this.nestedRootContentTabName,
       widgetGridCount: widgetGridCount ?? this.widgetGridCount,
       layoutOrder: layoutOrder ?? this.layoutOrder,
       widgetOrder: widgetOrder ?? this.widgetOrder,

@@ -70,11 +70,17 @@ class _SearchableDropdownFieldState<T extends Object>
         if (q.isEmpty) {
           return widget.options;
         }
-        return widget.options
-            .where(
-              (T t) => widget.optionLabel(t).toLowerCase().contains(q),
-            )
-            .toList(growable: false);
+        final List<T> matches = <T>[];
+        final List<T> nonMatches = <T>[];
+        for (final T t in widget.options) {
+          final String label = widget.optionLabel(t).toLowerCase();
+          if (label.contains(q)) {
+            matches.add(t);
+          } else {
+            nonMatches.add(t);
+          }
+        }
+        return <T>[...matches, ...nonMatches];
       },
       onSelected: (T selected) {
         widget.onChanged(selected);
@@ -117,9 +123,41 @@ class _SearchableDropdownFieldState<T extends Object>
                 itemCount: list.length,
                 itemBuilder: (BuildContext context, int index) {
                   final T item = list[index];
+                  final String label = widget.optionLabel(item);
+                  final String query = _text.text.trim();
+                  final int matchStart = query.isEmpty
+                      ? -1
+                      : label.toLowerCase().indexOf(query.toLowerCase());
+                  final TextStyle baseStyle =
+                      Theme.of(context).textTheme.bodyMedium ??
+                      const TextStyle();
                   return ListTile(
                     dense: true,
-                    title: Text(widget.optionLabel(item)),
+                    title: matchStart < 0
+                        ? Text(label, style: baseStyle)
+                        : RichText(
+                            text: TextSpan(
+                              style: baseStyle,
+                              children: <InlineSpan>[
+                                TextSpan(text: label.substring(0, matchStart)),
+                                TextSpan(
+                                  text: label.substring(
+                                    matchStart,
+                                    matchStart + query.length,
+                                  ),
+                                  style: baseStyle.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: Theme.of(context).colorScheme.primary,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text: label.substring(
+                                    matchStart + query.length,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                     onTap: () => onSelected(item),
                   );
                 },

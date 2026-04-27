@@ -30,14 +30,20 @@ class HomeController extends GetxController {
 
   List<BuilderPageEntity> get bottomPages => _orderedPages(
     pages
-        .where((BuilderPageEntity p) => p.showInBottomNav && !p.isDeleted)
+        .where(
+          (BuilderPageEntity p) =>
+              p.showInBottomNav && !p.isDeleted && !p.isDrawerParentContainer,
+        )
         .toList(),
     _bottomOrder,
   );
 
   List<BuilderPageEntity> get drawerPages => _orderedPages(
     pages
-        .where((BuilderPageEntity p) => p.showInDrawer && !p.isDeleted)
+        .where(
+          (BuilderPageEntity p) =>
+              p.showInDrawer && !p.isDeleted && p.nestedDisplayType == null,
+        )
         .toList(),
     _drawerOrder,
   );
@@ -52,7 +58,7 @@ class HomeController extends GetxController {
   final Rx<DrawerNavLayoutType> drawerNavLayout =
       DrawerNavLayoutType.softCard.obs;
 
-  bool get hasPages => pages.any((BuilderPageEntity p) => !p.isDeleted);
+  bool get hasPages => pages.any(_isUsablePage);
 
   bool get shouldShowBottomNav => bottomPages.length >= 2;
 
@@ -64,9 +70,13 @@ class HomeController extends GetxController {
       return null;
     }
     try {
-      return pages.firstWhere(
+      final BuilderPageEntity page = pages.firstWhere(
         (BuilderPageEntity p) => p.id == id && !p.isDeleted,
       );
+      if (!page.isDrawerParentContainer) {
+        return page;
+      }
+      return _firstUsableChildOf(page.id);
     } catch (_) {
       return null;
     }
@@ -76,7 +86,9 @@ class HomeController extends GetxController {
   void onInit() {
     super.onInit();
     final Map<String, dynamic>? args =
-        Get.arguments is Map<String, dynamic> ? Get.arguments as Map<String, dynamic> : null;
+        Get.arguments is Map<String, dynamic>
+            ? Get.arguments as Map<String, dynamic>
+            : null;
     loadPages(preferredPageId: args?['selectedPageId'] as String?);
   }
 
@@ -152,27 +164,50 @@ class HomeController extends GetxController {
       return;
     }
     if (preferredPageId != null &&
-        pages.any((BuilderPageEntity p) => p.id == preferredPageId && !p.isDeleted)) {
-      selectedPageId.value = preferredPageId;
-      return;
+        pages.any(
+          (BuilderPageEntity p) => p.id == preferredPageId && !p.isDeleted,
+        )) {
+      final String? resolved = _resolveSelectablePageId(preferredPageId);
+      if (resolved != null) {
+        selectedPageId.value = resolved;
+        return;
+      }
     }
     final String? current = selectedPageId.value;
     if (current != null &&
         pages.any((BuilderPageEntity p) => p.id == current && !p.isDeleted)) {
-      return;
+      final String? resolved = _resolveSelectablePageId(current);
+      if (resolved != null) {
+        selectedPageId.value = resolved;
+        return;
+      }
     }
     final String? main = _mainPageId.value;
     if (main != null &&
         pages.any((BuilderPageEntity p) => p.id == main && !p.isDeleted)) {
-      selectedPageId.value = main;
+      final String? resolved = _resolveSelectablePageId(main);
+      if (resolved != null) {
+        selectedPageId.value = resolved;
+        return;
+      }
+    }
+    if (bottomPages.isNotEmpty) {
+      selectedPageId.value = bottomPages.first.id;
       return;
     }
-    selectedPageId.value =
-        bottomPages.isNotEmpty ? bottomPages.first.id : drawerPages.first.id;
+    final BuilderPageEntity? firstDrawerPage = drawerPages.firstWhereOrNull(
+      (BuilderPageEntity p) => !p.isDrawerParentContainer,
+    );
+    if (firstDrawerPage != null) {
+      selectedPageId.value = firstDrawerPage.id;
+      return;
+    }
+    final BuilderPageEntity? fallback = pages.firstWhereOrNull(_isUsablePage);
+    selectedPageId.value = fallback?.id;
   }
 
   void selectPage(String id) {
-    selectedPageId.value = id;
+    selectedPageId.value = _resolveSelectablePageId(id);
   }
 
   void refreshBuilderPageContent() {
@@ -194,5 +229,33 @@ class HomeController extends GetxController {
 
   void openCreateNewPage() {
     Get.toNamed<void>(AppRoutes.createNewPage);
+  }
+
+  bool _isUsablePage(BuilderPageEntity p) =>
+      !p.isDeleted && !p.isDrawerParentContainer;
+
+  BuilderPageEntity? _firstUsableChildOf(String parentId) {
+    for (final BuilderPageEntity page in drawerPages) {
+      if (_isUsablePage(page) && page.parentPageId == parentId) {
+        return page;
+      }
+    }
+    return pages.firstWhereOrNull(
+      (BuilderPageEntity p) => _isUsablePage(p) && p.parentPageId == parentId,
+    );
+  }
+
+  String? _resolveSelectablePageId(String id) {
+    final BuilderPageEntity? page = pages.firstWhereOrNull(
+      (BuilderPageEntity p) => p.id == id && !p.isDeleted,
+    );
+    if (page == null) {
+      return null;
+    }
+    if (!page.isDrawerParentContainer) {
+      return page.id;
+    }
+    final BuilderPageEntity? child = _firstUsableChildOf(page.id);
+    return child?.id;
   }
 }

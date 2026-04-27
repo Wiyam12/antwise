@@ -25,8 +25,10 @@ import 'package:antwise/domain/usecases/get_table_rows_usecase.dart';
 import 'package:antwise/domain/usecases/get_table_schema_by_id_usecase.dart';
 import 'package:antwise/domain/usecases/replace_builder_pages_usecase.dart';
 import 'package:antwise/domain/usecases/replace_builder_widgets_usecase.dart';
+import 'package:antwise/domain/usecases/delete_table_row_usecase.dart';
 import 'package:antwise/domain/usecases/save_builder_widget_usecase.dart';
 import 'package:antwise/domain/usecases/save_navigation_config_usecase.dart';
+import 'package:antwise/domain/usecases/save_table_row_usecase.dart';
 import 'package:antwise/domain/usecases/save_table_schema_usecase.dart';
 import 'package:antwise/presentation/controllers/edit_table_controller.dart';
 import 'package:antwise/presentation/controllers/settings_page_layout_controller.dart';
@@ -135,6 +137,16 @@ class SettingsBinding extends Bindings {
         () => DeleteRowsByTableUseCase(Get.find<TableRowRepository>()),
       );
     }
+    if (!Get.isRegistered<SaveTableRowUseCase>()) {
+      Get.lazyPut<SaveTableRowUseCase>(
+        () => SaveTableRowUseCase(Get.find<TableRowRepository>()),
+      );
+    }
+    if (!Get.isRegistered<DeleteTableRowUseCase>()) {
+      Get.lazyPut<DeleteTableRowUseCase>(
+        () => DeleteTableRowUseCase(Get.find<TableRowRepository>()),
+      );
+    }
     if (!Get.isRegistered<BuilderWidgetLocalDataSource>()) {
       Get.lazyPut<BuilderWidgetLocalDataSource>(
         () => BuilderWidgetLocalDataSourceImpl(Get.find<HiveService>()),
@@ -142,7 +154,9 @@ class SettingsBinding extends Bindings {
     }
     if (!Get.isRegistered<BuilderWidgetRepository>()) {
       Get.lazyPut<BuilderWidgetRepository>(
-        () => BuilderWidgetRepositoryImpl(Get.find<BuilderWidgetLocalDataSource>()),
+        () => BuilderWidgetRepositoryImpl(
+          Get.find<BuilderWidgetLocalDataSource>(),
+        ),
       );
     }
     if (!Get.isRegistered<GetAllBuilderWidgetsUseCase>()) {
@@ -220,6 +234,10 @@ class SettingsBinding extends Bindings {
         Get.find<GetTableSchemaByIdUseCase>(),
         Get.find<SaveTableSchemaUseCase>(),
         Get.find<GetAllTableSchemasUseCase>(),
+        Get.find<GetTableRowsUseCase>(),
+        Get.find<SaveTableRowUseCase>(),
+        Get.find<DeleteTableRowUseCase>(),
+        Get.find<GetBuilderPagesUseCase>(),
       ),
       fenix: true,
     );

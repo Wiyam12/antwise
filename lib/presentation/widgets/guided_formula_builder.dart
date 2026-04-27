@@ -339,6 +339,16 @@ class GuidedFormulaBuilder extends StatelessWidget {
                 },
               ),
               ChoiceChip(
+                label: const Text('Other table column'),
+                selected: slot.source.value == FormulaSlotSourceKind.tableColumn,
+                onSelected: (bool s) {
+                  if (s) {
+                    slot.setSourceKind(FormulaSlotSourceKind.tableColumn);
+                    host.onGuidedFormulaInteraction(columnId);
+                  }
+                },
+              ),
+              ChoiceChip(
                 label: const Text('Formula'),
                 selected: slot.source.value == FormulaSlotSourceKind.nested,
                 onSelected:
@@ -408,6 +418,53 @@ class GuidedFormulaBuilder extends StatelessWidget {
                     },
                   );
                 },
+              );
+            case FormulaSlotSourceKind.tableColumn:
+              if (schemas.isEmpty) {
+                return Text(
+                  'No other tables yet. Create another table first.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                );
+              }
+              final List<TableSchemaEntity> options = schemas;
+              TableSchemaEntity? selected;
+              if (slot.tableSchemaId.value != null) {
+                selected = _schemaById(schemas, slot.tableSchemaId.value);
+              }
+              final List<TableColumnEntity> sourceCols =
+                  selected?.columns ?? const <TableColumnEntity>[];
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  SearchableDropdownField<String>(
+                    key: ValueKey<String?>(
+                      slot.tableSchemaId.value == null
+                          ? null
+                          : 'slot-table-${slot.tableSchemaId.value}',
+                    ),
+                    options: <String>[for (final TableSchemaEntity s in options) s.id],
+                    value: _validSchemaId(slot.tableSchemaId.value, schemas),
+                    optionLabel: (String id) {
+                      final TableSchemaEntity? s = _schemaById(schemas, id);
+                      return s == null ? id : host.tableDisplayLabel(s);
+                    },
+                    label: 'Select table',
+                    hintText: 'Search tables…',
+                    onChanged: (String tableId) {
+                      slot.tableSchemaId.value = tableId;
+                      slot.tableColumnController.clear();
+                      host.onGuidedFormulaInteraction(columnId);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  _columnDropdown(
+                    tableColumns: sourceCols,
+                    controller: slot.tableColumnController,
+                    hint: 'Select column',
+                  ),
+                ],
               );
             case FormulaSlotSourceKind.nested:
               final String nestedPrefix = '$errorKeyPrefix$slotErrorBase.nested.';

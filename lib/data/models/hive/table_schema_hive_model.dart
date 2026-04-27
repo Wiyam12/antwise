@@ -14,6 +14,7 @@ class TableSchemaHiveModel {
     this.tableKind = 'standard',
     this.summaryConfig,
     this.inventoryDeduction,
+    this.affectingTables,
     this.searchEnabled = false,
     this.dataLoadingMode = 'lazy',
     this.pageSize = 10,
@@ -33,6 +34,7 @@ class TableSchemaHiveModel {
   final String tableKind;
   final Map<String, dynamic>? summaryConfig;
   final Map<String, dynamic>? inventoryDeduction;
+  final List<Map<String, dynamic>>? affectingTables;
   final bool searchEnabled;
   final String dataLoadingMode;
   final int pageSize;
@@ -101,6 +103,17 @@ class TableSchemaHiveModelAdapter extends TypeAdapter<TableSchemaHiveModel> {
       inventoryDeduction = (data[12]! as Map).cast<String, dynamic>();
     }
 
+    List<Map<String, dynamic>>? affectingTables;
+    if (data.containsKey(17) && data[17] is List) {
+      final List<Map<String, dynamic>> parsed = <Map<String, dynamic>>[];
+      for (final dynamic item in data[17] as List) {
+        if (item is Map) {
+          parsed.add(item.cast<String, dynamic>());
+        }
+      }
+      affectingTables = parsed;
+    }
+
     final bool searchEnabled = data[13] == true;
     final String dataLoadingMode =
         (data[14] is String ? data[14] as String : 'lazy');
@@ -120,6 +133,7 @@ class TableSchemaHiveModelAdapter extends TypeAdapter<TableSchemaHiveModel> {
       tableKind: tableKind,
       summaryConfig: summaryConfig,
       inventoryDeduction: inventoryDeduction,
+      affectingTables: affectingTables,
       searchEnabled: searchEnabled,
       dataLoadingMode: dataLoadingMode,
       pageSize: pageSize,
@@ -131,7 +145,7 @@ class TableSchemaHiveModelAdapter extends TypeAdapter<TableSchemaHiveModel> {
   @override
   void write(BinaryWriter writer, TableSchemaHiveModel obj) {
     writer
-      ..writeByte(17)
+      ..writeByte(18)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -165,6 +179,8 @@ class TableSchemaHiveModelAdapter extends TypeAdapter<TableSchemaHiveModel> {
       ..writeByte(15)
       ..write(obj.pageSize)
       ..writeByte(16)
-      ..write(obj.lazyInitialLoad);
+      ..write(obj.lazyInitialLoad)
+      ..writeByte(17)
+      ..write(obj.affectingTables ?? <Map<String, dynamic>>[]);
   }
 }

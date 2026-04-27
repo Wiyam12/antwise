@@ -318,7 +318,6 @@ class CreateWidgetController extends GetxController {
             }
             if (yColumn != null &&
                 yColumn.type != TableColumnType.number &&
-                yColumn.type != TableColumnType.currency &&
                 yColumn.type != TableColumnType.formula) {
               yAxisError.value = 'Y-axis column must be numeric';
               return yAxisError.value;

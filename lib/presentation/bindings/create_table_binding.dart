@@ -2,15 +2,20 @@ import 'package:antwise/core/storage/hive_service.dart';
 import 'package:antwise/data/datasources/builder_pages_local_datasource.dart';
 import 'package:antwise/data/datasources/builder_widget_local_datasource.dart';
 import 'package:antwise/data/datasources/table_schema_local_datasource.dart';
+import 'package:antwise/data/datasources/table_row_local_datasource.dart';
 import 'package:antwise/data/repositories/builder_pages_repository_impl.dart';
 import 'package:antwise/data/repositories/builder_widget_repository_impl.dart';
 import 'package:antwise/data/repositories/table_schema_repository_impl.dart';
+import 'package:antwise/data/repositories/table_row_repository_impl.dart';
 import 'package:antwise/domain/repositories/builder_pages_repository.dart';
 import 'package:antwise/domain/repositories/builder_widget_repository.dart';
 import 'package:antwise/domain/repositories/table_schema_repository.dart';
+import 'package:antwise/domain/repositories/table_row_repository.dart';
 import 'package:antwise/domain/usecases/get_all_table_schemas_usecase.dart';
 import 'package:antwise/domain/usecases/get_builder_pages_usecase.dart';
+import 'package:antwise/domain/usecases/get_table_rows_usecase.dart';
 import 'package:antwise/domain/usecases/save_builder_widget_usecase.dart';
+import 'package:antwise/domain/usecases/save_table_row_usecase.dart';
 import 'package:antwise/domain/usecases/save_table_schema_usecase.dart';
 import 'package:antwise/presentation/controllers/create_table_controller.dart';
 import 'package:get/get.dart';
@@ -55,6 +60,26 @@ class CreateTableBinding extends Bindings {
         () => GetAllTableSchemasUseCase(Get.find<TableSchemaRepository>()),
       );
     }
+    if (!Get.isRegistered<TableRowLocalDataSource>()) {
+      Get.lazyPut<TableRowLocalDataSource>(
+        () => TableRowLocalDataSourceImpl(Get.find<HiveService>()),
+      );
+    }
+    if (!Get.isRegistered<TableRowRepository>()) {
+      Get.lazyPut<TableRowRepository>(
+        () => TableRowRepositoryImpl(Get.find<TableRowLocalDataSource>()),
+      );
+    }
+    if (!Get.isRegistered<SaveTableRowUseCase>()) {
+      Get.lazyPut<SaveTableRowUseCase>(
+        () => SaveTableRowUseCase(Get.find<TableRowRepository>()),
+      );
+    }
+    if (!Get.isRegistered<GetTableRowsUseCase>()) {
+      Get.lazyPut<GetTableRowsUseCase>(
+        () => GetTableRowsUseCase(Get.find<TableRowRepository>()),
+      );
+    }
 
     if (!Get.isRegistered<BuilderWidgetLocalDataSource>()) {
       Get.lazyPut<BuilderWidgetLocalDataSource>(
@@ -80,6 +105,8 @@ class CreateTableBinding extends Bindings {
         Get.find<SaveTableSchemaUseCase>(),
         Get.find<SaveBuilderWidgetUseCase>(),
         Get.find<GetAllTableSchemasUseCase>(),
+        Get.find<SaveTableRowUseCase>(),
+        Get.find<GetTableRowsUseCase>(),
       ),
     );
   }

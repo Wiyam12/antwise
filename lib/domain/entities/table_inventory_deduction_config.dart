@@ -21,7 +21,7 @@ class TableInventoryDeductionConfig {
   /// Column on the **line** table whose value matches [stockMatchColumnId].
   final String lineProductColumnId;
 
-  /// Column on the **line** table with quantity sold / used (number or currency).
+  /// Column on the **line** table with quantity sold / used (number).
   final String lineQuantityColumnId;
 
   Map<String, dynamic> toJson() => <String, dynamic>{

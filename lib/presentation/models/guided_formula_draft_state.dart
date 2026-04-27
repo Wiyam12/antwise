@@ -1,4 +1,5 @@
 import 'package:antwise/domain/entities/table_schema_entity.dart';
+import 'package:antwise/domain/entities/table_column_entity.dart';
 import 'package:antwise/domain/formula/guided_formula_kind.dart';
 import 'package:antwise/domain/validation/table_formula_validator.dart';
 import 'package:antwise/presentation/models/arithmetic_expression_formula.dart';
@@ -369,6 +370,32 @@ class GuidedFormulaDraftState {
           errorsOut[errorKeyPrefix] = 'Referenced column does not exist.';
         }
         return;
+      case FormulaSlotSourceKind.tableColumn:
+        final String? tid = slot.tableSchemaId.value;
+        final String col = slot.tableColumnController.text.trim();
+        if (tid == null) {
+          errorsOut[errorKeyPrefix] = 'Select a table.';
+          return;
+        }
+        TableSchemaEntity? table;
+        for (final TableSchemaEntity s in schemas) {
+          if (s.id == tid) {
+            table = s;
+            break;
+          }
+        }
+        if (table == null) {
+          errorsOut[errorKeyPrefix] = 'Referenced table does not exist.';
+          return;
+        }
+        if (col.isEmpty) {
+          errorsOut[errorKeyPrefix] = 'Select a column.';
+          return;
+        }
+        if (!table.columns.any((TableColumnEntity c) => c.name.trim() == col)) {
+          errorsOut[errorKeyPrefix] = 'Referenced column does not exist.';
+        }
+        return;
       case FormulaSlotSourceKind.nested:
         if (slot.nested.guidedFormulaKind.value == null) {
           errorsOut[errorKeyPrefix] = 'Pick a nested formula type.';
@@ -417,6 +444,23 @@ class GuidedFormulaDraftState {
           return null;
         }
         return _atomIdentOrQuoted(n);
+      case FormulaSlotSourceKind.tableColumn:
+        final String? tid = slot.tableSchemaId.value;
+        final String col = slot.tableColumnController.text.trim();
+        if (tid == null || col.isEmpty) {
+          return null;
+        }
+        TableSchemaEntity? table;
+        for (final TableSchemaEntity s in schemas) {
+          if (s.id == tid) {
+            table = s;
+            break;
+          }
+        }
+        if (table == null) {
+          return null;
+        }
+        return '${_atomIdentOrQuoted(table.name.trim())}.${_atomIdentOrQuoted(col)}';
       case FormulaSlotSourceKind.nested:
         return slot.nested.composeGuidedFormula(
           schemas,

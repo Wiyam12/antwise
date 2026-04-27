@@ -1,7 +1,8 @@
 enum DrawerNavLayoutType {
   classicList,
   softCard,
-  pillGradient;
+  pillGradient,
+  themeBackground;
 
   static DrawerNavLayoutType fromStorage(String? value) {
     switch (value) {
@@ -9,6 +10,8 @@ enum DrawerNavLayoutType {
         return DrawerNavLayoutType.classicList;
       case 'pillGradient':
         return DrawerNavLayoutType.pillGradient;
+      case 'themeBackground':
+        return DrawerNavLayoutType.themeBackground;
       default:
         return DrawerNavLayoutType.softCard;
     }
@@ -18,5 +21,6 @@ enum DrawerNavLayoutType {
     DrawerNavLayoutType.classicList => 'classicList',
     DrawerNavLayoutType.softCard => 'softCard',
     DrawerNavLayoutType.pillGradient => 'pillGradient',
+    DrawerNavLayoutType.themeBackground => 'themeBackground',
   };
 }

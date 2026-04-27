@@ -1,6 +1,7 @@
 import 'package:antwise/domain/entities/product_display_mode.dart';
 import 'package:antwise/domain/entities/table_column_entity.dart';
 import 'package:antwise/domain/entities/table_data_loading_mode.dart';
+import 'package:antwise/domain/entities/table_affecting_config.dart';
 import 'package:antwise/domain/entities/table_kind.dart';
 import 'package:antwise/domain/entities/table_layout_type.dart';
 import 'package:antwise/domain/entities/table_list_design_layout.dart';
@@ -22,6 +23,7 @@ class TableSchemaEntity {
     this.tableKind = TableKind.standard,
     this.summaryConfig,
     this.inventoryDeduction,
+    this.affectingTables = const <TableAffectingConfig>[],
     this.searchEnabled = false,
     this.dataLoadingMode = TableDataLoadingMode.lazy,
     this.pageSize = 10,
@@ -53,6 +55,9 @@ class TableSchemaEntity {
 
   /// Optional: after a **new** row is saved, decrement stock on [stockTableId].
   final TableInventoryDeductionConfig? inventoryDeduction;
+
+  /// Optional CRUD side effects to apply on other tables by row matching.
+  final List<TableAffectingConfig> affectingTables;
 
   /// Optional search box visibility for runtime table view.
   final bool searchEnabled;

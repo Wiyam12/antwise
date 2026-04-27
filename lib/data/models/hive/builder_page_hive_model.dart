@@ -8,7 +8,10 @@ class BuilderPageHiveModel {
     required this.icon,
     required this.navigationType,
     required this.isDeleted,
+    this.isDrawerParentContainer = false,
     this.parentPageId,
+    this.nestedDisplayType,
+    this.nestedRootContentTabName,
     this.widgetGridCount = 1,
     this.layoutOrder = const <String>[],
     this.widgetOrder = const <String>[],
@@ -23,7 +26,10 @@ class BuilderPageHiveModel {
   /// bottom | drawer | both
   final String navigationType;
   final bool isDeleted;
+  final bool isDrawerParentContainer;
   final String? parentPageId;
+  final String? nestedDisplayType;
+  final String? nestedRootContentTabName;
   final int widgetGridCount;
   final List<String> layoutOrder;
   final List<String> widgetOrder;
@@ -40,7 +46,10 @@ class BuilderPageHiveModel {
     showInDrawer: showInDrawer,
     isDeleted: isDeleted,
     iconName: icon,
+    isDrawerParentContainer: isDrawerParentContainer,
     parentPageId: parentPageId,
+    nestedDisplayType: NestedPageDisplayType.tryFromStorage(nestedDisplayType),
+    nestedRootContentTabName: nestedRootContentTabName,
     widgetGridCount: widgetGridCount,
     layoutOrder: layoutOrder,
     widgetOrder: widgetOrder,
@@ -58,7 +67,10 @@ class BuilderPageHiveModel {
                 ? 'bottom'
                 : 'drawer',
         isDeleted: entity.isDeleted,
+        isDrawerParentContainer: entity.isDrawerParentContainer,
         parentPageId: entity.parentPageId,
+        nestedDisplayType: entity.nestedDisplayType?.storageValue,
+        nestedRootContentTabName: entity.nestedRootContentTabName,
         widgetGridCount: entity.widgetGridCount,
         layoutOrder: entity.layoutOrder,
         widgetOrder: entity.widgetOrder,
@@ -82,7 +94,10 @@ class BuilderPageHiveModelAdapter extends TypeAdapter<BuilderPageHiveModel> {
       icon: data[2] as String,
       navigationType: data[3] as String,
       isDeleted: data[4] as bool? ?? false,
+      isDrawerParentContainer: data[11] as bool? ?? false,
       parentPageId: data[5] as String?,
+      nestedDisplayType: data[9] as String?,
+      nestedRootContentTabName: data[10] as String?,
       widgetGridCount: (data[6] as num?)?.toInt() ?? 1,
       layoutOrder:
           ((data[7] as List?) ?? const <dynamic>[])
@@ -98,7 +113,7 @@ class BuilderPageHiveModelAdapter extends TypeAdapter<BuilderPageHiveModel> {
   @override
   void write(BinaryWriter writer, BuilderPageHiveModel obj) {
     writer
-      ..writeByte(9)
+      ..writeByte(12)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -116,6 +131,12 @@ class BuilderPageHiveModelAdapter extends TypeAdapter<BuilderPageHiveModel> {
       ..writeByte(7)
       ..write(obj.layoutOrder)
       ..writeByte(8)
-      ..write(obj.widgetOrder);
+      ..write(obj.widgetOrder)
+      ..writeByte(9)
+      ..write(obj.nestedDisplayType)
+      ..writeByte(10)
+      ..write(obj.nestedRootContentTabName)
+      ..writeByte(11)
+      ..write(obj.isDrawerParentContainer);
   }
 }

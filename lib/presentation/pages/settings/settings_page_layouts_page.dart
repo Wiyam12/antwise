@@ -1,3 +1,4 @@
+import 'package:antwise/core/icons/app_icon_registry.dart';
 import 'package:antwise/presentation/controllers/settings_page_layout_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -24,6 +25,7 @@ class SettingsPageLayoutsPage extends GetView<SettingsPageLayoutController> {
             final page = controller.pages[index];
             return Card(
               child: ListTile(
+                leading: Icon(AppIconRegistry.iconOf(page.iconName)),
                 title: Text(page.name),
                 subtitle: Text(
                   'Widgets per row: ${page.widgetGridCount.clamp(1, 3)}',

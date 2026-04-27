@@ -36,7 +36,7 @@ abstract final class AppColors {
       primary: Color(0xFF1565C0),
       secondary: Color(0xFF26A69A),
       accent: Color(0xFF81D4FA),
-      onPrimary: Colors.black,
+      onPrimary: Colors.white,
     ),
     ThemePreset(
       name: 'Sunset',

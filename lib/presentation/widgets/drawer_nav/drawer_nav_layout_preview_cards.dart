@@ -15,45 +15,54 @@ class DrawerNavLayoutPicker extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        const double minCard = 148.0;
-        final int crossAxisCount =
-            constraints.maxWidth >= minCard * 3 + 32 ? 3 : 1;
+        final double cardWidth = (constraints.maxWidth - 12) / 2;
         return Wrap(
           spacing: 12,
           runSpacing: 12,
           children: <Widget>[
-            _DrawerLayoutCard(
-              title: 'Classic',
-              subtitle: 'Clean list menu',
-              selected: selected == DrawerNavLayoutType.classicList,
-              onTap: () => onSelect(DrawerNavLayoutType.classicList),
-              minWidth:
-                  crossAxisCount == 3
-                      ? (constraints.maxWidth - 24) / 3
-                      : constraints.maxWidth,
-              child: const _MiniClassicDrawerPreview(),
+            SizedBox(
+              width: cardWidth,
+              child: _DrawerLayoutCard(
+                title: 'Classic',
+                subtitle: 'Clean list menu',
+                selected: selected == DrawerNavLayoutType.classicList,
+                onTap: () => onSelect(DrawerNavLayoutType.classicList),
+                minWidth: cardWidth,
+                child: const _MiniClassicDrawerPreview(),
+              ),
             ),
-            _DrawerLayoutCard(
-              title: 'Soft card',
-              subtitle: 'Highlighted row',
-              selected: selected == DrawerNavLayoutType.softCard,
-              onTap: () => onSelect(DrawerNavLayoutType.softCard),
-              minWidth:
-                  crossAxisCount == 3
-                      ? (constraints.maxWidth - 24) / 3
-                      : constraints.maxWidth,
-              child: const _MiniSoftDrawerPreview(),
+            SizedBox(
+              width: cardWidth,
+              child: _DrawerLayoutCard(
+                title: 'Soft card',
+                subtitle: 'Highlighted row',
+                selected: selected == DrawerNavLayoutType.softCard,
+                onTap: () => onSelect(DrawerNavLayoutType.softCard),
+                minWidth: cardWidth,
+                child: const _MiniSoftDrawerPreview(),
+              ),
             ),
-            _DrawerLayoutCard(
-              title: 'Pill gradient',
-              subtitle: 'Rounded active item',
-              selected: selected == DrawerNavLayoutType.pillGradient,
-              onTap: () => onSelect(DrawerNavLayoutType.pillGradient),
-              minWidth:
-                  crossAxisCount == 3
-                      ? (constraints.maxWidth - 24) / 3
-                      : constraints.maxWidth,
-              child: const _MiniGradientDrawerPreview(),
+            SizedBox(
+              width: cardWidth,
+              child: _DrawerLayoutCard(
+                title: 'Pill gradient',
+                subtitle: 'Rounded active item',
+                selected: selected == DrawerNavLayoutType.pillGradient,
+                onTap: () => onSelect(DrawerNavLayoutType.pillGradient),
+                minWidth: cardWidth,
+                child: const _MiniGradientDrawerPreview(),
+              ),
+            ),
+            SizedBox(
+              width: cardWidth,
+              child: _DrawerLayoutCard(
+                title: 'Theme bg',
+                subtitle: 'Primary drawer surface',
+                selected: selected == DrawerNavLayoutType.themeBackground,
+                onTap: () => onSelect(DrawerNavLayoutType.themeBackground),
+                minWidth: cardWidth,
+                child: const _MiniThemeBackgroundDrawerPreview(),
+              ),
             ),
           ],
         );
@@ -105,7 +114,7 @@ class _DrawerLayoutCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                SizedBox(height: 68, child: child),
+                SizedBox(height: 104, child: child),
                 const SizedBox(height: 10),
                 Text(
                   title,
@@ -134,24 +143,9 @@ class _MiniClassicDrawerPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        children: <Widget>[
-          _miniLine(scheme.onSurfaceVariant, 0.42),
-          const SizedBox(height: 6),
-          _miniLine(scheme.onSurface, 0.72),
-          const SizedBox(height: 6),
-          _miniLine(scheme.onSurfaceVariant, 0.68),
-          const SizedBox(height: 6),
-          _miniLine(scheme.onSurfaceVariant, 0.63),
-        ],
-      ),
+    return _MiniDrawerShell(
+      layout: DrawerNavLayoutType.classicList,
+      selectedIndex: 0,
     );
   }
 }
@@ -161,30 +155,9 @@ class _MiniSoftDrawerPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        children: <Widget>[
-          _miniLine(scheme.onSurfaceVariant, 0.42),
-          const SizedBox(height: 6),
-          Container(
-            height: 14,
-            decoration: BoxDecoration(
-              color: scheme.primaryContainer.withValues(alpha: 0.45),
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-          const SizedBox(height: 6),
-          _miniLine(scheme.onSurfaceVariant, 0.68),
-          const SizedBox(height: 6),
-          _miniLine(scheme.onSurfaceVariant, 0.63),
-        ],
-      ),
+    return _MiniDrawerShell(
+      layout: DrawerNavLayoutType.softCard,
+      selectedIndex: 1,
     );
   }
 }
@@ -194,51 +167,273 @@ class _MiniGradientDrawerPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(8),
+    return _MiniDrawerShell(
+      layout: DrawerNavLayoutType.pillGradient,
+      selectedIndex: 2,
+    );
+  }
+}
+
+class _MiniThemeBackgroundDrawerPreview extends StatelessWidget {
+  const _MiniThemeBackgroundDrawerPreview();
+
+  @override
+  Widget build(BuildContext context) {
+    return _MiniDrawerShell(
+      layout: DrawerNavLayoutType.themeBackground,
+      selectedIndex: 1,
+    );
+  }
+}
+
+class _MiniDrawerShell extends StatelessWidget {
+  const _MiniDrawerShell({required this.layout, required this.selectedIndex});
+
+  final DrawerNavLayoutType layout;
+  final int selectedIndex;
+
+  static const List<({IconData icon, String label})> _items =
+      <({IconData icon, String label})>[
+        (icon: Icons.dashboard_outlined, label: 'Dashboard'),
+        (icon: Icons.assessment_outlined, label: 'Reports'),
+        (icon: Icons.settings_outlined, label: 'Settings'),
+      ];
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final bool themedBackground = layout == DrawerNavLayoutType.themeBackground;
+    final Color themedBase = _themeBackgroundBase(theme);
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surface,
+        color: themedBackground ? themedBase : scheme.surface,
         borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color:
+              themedBackground
+                  ? themedBase.withValues(alpha: 0.75)
+                  : scheme.outlineVariant.withValues(alpha: 0.75),
+        ),
       ),
-      child: Column(
-        children: <Widget>[
-          _miniLine(scheme.onSurfaceVariant, 0.42),
-          const SizedBox(height: 6),
-          Container(
-            height: 14,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: <Color>[
-                  scheme.primary,
-                  scheme.primary.withValues(alpha: 0.75),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(6, 6, 6, 4),
+        child: SingleChildScrollView(
+          physics: const NeverScrollableScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  CircleAvatar(
+                    radius: 8,
+                    backgroundColor: scheme.primaryContainer,
+                    child: Icon(
+                      Icons.person_outline,
+                      size: 10,
+                      color: scheme.onPrimaryContainer,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Menu',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color:
+                            themedBackground
+                                ? Colors.white.withValues(alpha: 0.92)
+                                : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
                 ],
               ),
-              borderRadius: BorderRadius.circular(999),
-            ),
+              const SizedBox(height: 4),
+              for (int i = 0; i < _items.length; i++) ...<Widget>[
+                _MiniDrawerItemTile(
+                  layout: layout,
+                  icon: _items[i].icon,
+                  label: _items[i].label,
+                  selected: i == selectedIndex,
+                ),
+                if (i != _items.length - 1) const SizedBox(height: 2),
+              ],
+            ],
           ),
-          const SizedBox(height: 6),
-          _miniLine(scheme.onSurfaceVariant, 0.68),
-          const SizedBox(height: 6),
-          _miniLine(scheme.onSurfaceVariant, 0.63),
-        ],
+        ),
       ),
     );
   }
 }
 
-Widget _miniLine(Color color, double factor) {
-  return Align(
-    alignment: Alignment.centerLeft,
-    child: FractionallySizedBox(
-      widthFactor: factor,
-      child: Container(
-        height: 3,
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.7),
-          borderRadius: BorderRadius.circular(999),
-        ),
-      ),
-    ),
-  );
+class _MiniDrawerItemTile extends StatelessWidget {
+  const _MiniDrawerItemTile({
+    required this.layout,
+    required this.icon,
+    required this.label,
+    required this.selected,
+  });
+
+  final DrawerNavLayoutType layout;
+  final IconData icon;
+  final String label;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final bool themedBackground = layout == DrawerNavLayoutType.themeBackground;
+    final Color activeBg = _themeBackgroundActiveColor(
+      _themeBackgroundBase(theme),
+    );
+    final Color nonSelectedText =
+        themedBackground ? Colors.white : scheme.onSurface;
+    final Color nonSelectedIcon =
+        themedBackground
+            ? Colors.white.withValues(alpha: 0.92)
+            : scheme.onSurfaceVariant;
+
+    switch (layout) {
+      case DrawerNavLayoutType.classicList:
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                icon,
+                size: 12,
+                color: selected ? scheme.primary : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: selected ? scheme.primary : scheme.onSurface,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      case DrawerNavLayoutType.softCard:
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color:
+                selected
+                    ? scheme.secondaryContainer.withValues(alpha: 0.55)
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                icon,
+                size: 12,
+                color:
+                    selected
+                        ? scheme.onSecondaryContainer
+                        : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color:
+                        selected
+                            ? scheme.onSecondaryContainer
+                            : scheme.onSurface,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      case DrawerNavLayoutType.pillGradient:
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            gradient:
+                selected
+                    ? LinearGradient(
+                      colors: <Color>[
+                        scheme.primary,
+                        scheme.primary.withValues(alpha: 0.78),
+                      ],
+                    )
+                    : null,
+          ),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                icon,
+                size: 12,
+                color: selected ? scheme.onPrimary : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: selected ? scheme.onPrimary : scheme.onSurface,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      case DrawerNavLayoutType.themeBackground:
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: selected ? activeBg : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                icon,
+                size: 12,
+                color: selected ? Colors.white : nonSelectedIcon,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: selected ? Colors.white : nonSelectedText,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+    }
+  }
+}
+
+Color _themeBackgroundBase(ThemeData theme) {
+  return theme.colorScheme.primary;
+}
+
+Color _themeBackgroundActiveColor(Color base) {
+  return Color.alphaBlend(Colors.white.withValues(alpha: 0.26), base);
 }

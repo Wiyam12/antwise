@@ -1,3 +1,4 @@
+import 'package:antwise/core/icons/app_icon_registry.dart';
 import 'package:antwise/presentation/controllers/settings_tables_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -29,6 +30,7 @@ class SettingsTablesPage extends GetView<SettingsTablesController> {
                 key: ValueKey<String>('page-${page.id}-$expanded'),
                 initiallyExpanded: expanded,
                 onExpansionChanged: (_) => controller.toggleExpanded(page.id),
+                leading: Icon(AppIconRegistry.iconOf(page.iconName)),
                 title: Text(page.name),
                 children: <Widget>[
                   if (tables.isEmpty)
