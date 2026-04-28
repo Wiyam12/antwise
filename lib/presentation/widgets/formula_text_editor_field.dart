@@ -46,6 +46,7 @@ class _FormulaTextEditorFieldState extends State<FormulaTextEditorField> {
     'SUM': 'SUM(?)',
     'COUNT': 'COUNT(?)',
     'AVG': 'AVG(?)',
+    'COUNTIF': 'COUNTIF(?, ?)',
     'IF': 'IF(?, ?, ?)',
     'LOOKUP': 'LOOKUP(?, ?, ?)',
   };

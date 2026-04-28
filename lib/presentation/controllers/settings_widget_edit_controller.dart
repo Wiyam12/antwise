@@ -3,7 +3,6 @@ import 'package:antwise/domain/entities/builder_page_entity.dart';
 import 'package:antwise/domain/entities/builder_widget_entity.dart';
 import 'package:antwise/domain/entities/card_widget_layout.dart';
 import 'package:antwise/domain/entities/table_column_entity.dart';
-import 'package:antwise/domain/entities/table_column_type.dart';
 import 'package:antwise/domain/entities/table_schema_entity.dart';
 import 'package:antwise/domain/usecases/get_all_builder_widgets_usecase.dart';
 import 'package:antwise/domain/usecases/get_all_table_schemas_usecase.dart';
@@ -11,6 +10,7 @@ import 'package:antwise/domain/usecases/get_builder_pages_usecase.dart';
 import 'package:antwise/domain/usecases/save_builder_widget_usecase.dart';
 import 'package:antwise/domain/validation/table_formula_validator.dart';
 import 'package:antwise/presentation/controllers/home_controller.dart';
+import 'package:antwise/presentation/routes/app_routes.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -33,6 +33,7 @@ class SettingsWidgetEditController extends GetxController {
 
   final RxBool isLoading = true.obs;
   final RxBool isSaving = false.obs;
+  final RxInt currentStep = 0.obs;
   final Rxn<BuilderWidgetEntity> widget = Rxn<BuilderWidgetEntity>();
   final RxList<TableSchemaEntity> allSchemas = <TableSchemaEntity>[].obs;
   final RxList<BuilderPageEntity> pages = <BuilderPageEntity>[].obs;
@@ -44,12 +45,15 @@ class SettingsWidgetEditController extends GetxController {
   final Rxn<SettingsChartWidgetType> selectedChartType =
       Rxn<SettingsChartWidgetType>();
   final RxnString selectedTableId = RxnString();
+  final RxnString selectedPageId = RxnString();
   final RxnString selectedXAxisColumnId = RxnString();
   final RxnString selectedYAxisColumnId = RxnString();
   final RxnString selectedColumnId = RxnString();
 
+  final RxString widgetTypeError = ''.obs;
   final RxString layoutError = ''.obs;
   final RxString chartTypeError = ''.obs;
+  final RxString pageError = ''.obs;
   final RxString tableError = ''.obs;
   final RxString xAxisError = ''.obs;
   final RxString yAxisError = ''.obs;
@@ -104,12 +108,14 @@ class SettingsWidgetEditController extends GetxController {
       selectedLayout.value = CardWidgetLayout.fromStorage(
         target.config['cardLayout']?.toString(),
       );
-      selectedChartType.value = switch (target.config['chartType']?.toString()) {
+      selectedChartType.value = switch (target.config['chartType']
+          ?.toString()) {
         'line' => SettingsChartWidgetType.line,
         'pie' => SettingsChartWidgetType.pie,
         _ => SettingsChartWidgetType.bar,
       };
       selectedTableId.value = target.config['tableId']?.toString();
+      selectedPageId.value = target.pageId;
       selectedColumnId.value = target.config['columnId']?.toString();
       selectedXAxisColumnId.value = target.config['xColumnId']?.toString();
       selectedYAxisColumnId.value = target.config['yColumnId']?.toString();
@@ -153,6 +159,11 @@ class SettingsWidgetEditController extends GetxController {
     layoutError.value = '';
   }
 
+  void onPageChanged(String? pageId) {
+    selectedPageId.value = pageId;
+    pageError.value = '';
+  }
+
   void onTableChanged(String? tableId) {
     selectedTableId.value = tableId;
     selectedColumnId.value = null;
@@ -185,14 +196,21 @@ class SettingsWidgetEditController extends GetxController {
   }
 
   bool _validate() {
+    widgetTypeError.value = '';
     layoutError.value = '';
     chartTypeError.value = '';
+    pageError.value = '';
     tableError.value = '';
     xAxisError.value = '';
     yAxisError.value = '';
     columnError.value = '';
     formulaError.value = '';
 
+    final String? pageId = selectedPageId.value;
+    if (pageId == null || pageId.isEmpty) {
+      pageError.value = 'Assign a page';
+      return false;
+    }
     if (isCardWidget) {
       if (selectedLayout.value == null) {
         layoutError.value = 'Select a card layout';
@@ -204,69 +222,6 @@ class SettingsWidgetEditController extends GetxController {
         return false;
       }
     }
-    final TableSchemaEntity? table = selectedTable;
-    if (table == null) {
-      tableError.value = 'Select a source table';
-      return false;
-    }
-
-    if (isCardWidget) {
-      final String? columnId = selectedColumnId.value;
-      if (columnId == null || columnId.isEmpty) {
-        columnError.value = 'Select a source column';
-        return false;
-      }
-      bool columnExists = false;
-      for (final TableColumnEntity col in table.columns) {
-        if (col.id == columnId) {
-          columnExists = true;
-          break;
-        }
-      }
-      if (!columnExists) {
-        columnError.value = 'Column is no longer available';
-        return false;
-      }
-    } else if (isChartWidget) {
-      final String? xColId = selectedXAxisColumnId.value;
-      final String? yColId = selectedYAxisColumnId.value;
-      final String formula = formulaController.text.trim();
-      if (xColId == null || xColId.isEmpty) {
-        xAxisError.value = 'Select an X-axis column';
-        return false;
-      }
-      if ((yColId == null || yColId.isEmpty) && formula.isEmpty) {
-        yAxisError.value = 'Select a Y-axis column or provide a formula';
-        return false;
-      }
-      bool xColExists = false;
-      bool yColExists = yColId == null || yColId.isEmpty;
-      TableColumnEntity? yColumn;
-      for (final TableColumnEntity col in table.columns) {
-        if (col.id == xColId) {
-          xColExists = true;
-        }
-        if (col.id == yColId) {
-          yColExists = true;
-          yColumn = col;
-        }
-      }
-      if (!xColExists) {
-        xAxisError.value = 'X-axis column is no longer available';
-        return false;
-      }
-      if (!yColExists) {
-        yAxisError.value = 'Y-axis column is no longer available';
-        return false;
-      }
-      if (yColumn != null &&
-          yColumn.type != TableColumnType.number &&
-          yColumn.type != TableColumnType.formula) {
-        yAxisError.value = 'Y-axis column must be numeric';
-        return false;
-      }
-    }
-
     final String formula = formulaController.text.trim();
     if (formula.isNotEmpty) {
       final String? error = TableFormulaValidator.validate(
@@ -283,6 +238,56 @@ class SettingsWidgetEditController extends GetxController {
     return true;
   }
 
+  String? validateForStep(int step) {
+    switch (step) {
+      case 0:
+        if (widget.value == null) {
+          widgetTypeError.value = 'Widget not found';
+          return widgetTypeError.value;
+        }
+        return null;
+      case 1:
+        if (isCardWidget && selectedLayout.value == null) {
+          layoutError.value = 'Card layout is required';
+          return layoutError.value;
+        }
+        if (isChartWidget && selectedChartType.value == null) {
+          chartTypeError.value = 'Chart type is required';
+          return chartTypeError.value;
+        }
+        return null;
+      case 2:
+        if (!_validate()) {
+          return 'Please fix the highlighted fields.';
+        }
+        return null;
+      case 3:
+        return null;
+      default:
+        return null;
+    }
+  }
+
+  Future<void> goNext() async {
+    final String? error = validateForStep(currentStep.value);
+    if (error != null) {
+      showAppSnackbar('Validation', error);
+      return;
+    }
+    if (currentStep.value >= 2) {
+      return;
+    }
+    currentStep.value++;
+  }
+
+  void goBack() {
+    if (currentStep.value > 0) {
+      currentStep.value--;
+      return;
+    }
+    Get.back<void>();
+  }
+
   Future<void> save() async {
     final BuilderWidgetEntity? current = widget.value;
     if (current == null) {
@@ -295,19 +300,35 @@ class SettingsWidgetEditController extends GetxController {
 
     isSaving.value = true;
     try {
+      final String? resolvedTableId =
+          selectedTableId.value ?? current.config['tableId']?.toString();
       final Map<String, dynamic> nextConfig = <String, dynamic>{
         ...current.config,
-        'tableId': selectedTableId.value!,
       };
+      if (resolvedTableId != null && resolvedTableId.isNotEmpty) {
+        nextConfig['tableId'] = resolvedTableId;
+      }
       if (isCardWidget) {
-        nextConfig['cardLayout'] = selectedLayout.value!.storageValue;
-        nextConfig['columnId'] = selectedColumnId.value!;
+        final CardWidgetLayout? layout = selectedLayout.value;
+        if (layout != null) {
+          nextConfig['cardLayout'] = layout.storageValue;
+        }
+        final String? resolvedColumnId =
+            selectedColumnId.value ?? current.config['columnId']?.toString();
+        if (resolvedColumnId != null && resolvedColumnId.isNotEmpty) {
+          nextConfig['columnId'] = resolvedColumnId;
+        }
         nextConfig.remove('chartType');
         nextConfig.remove('xColumnId');
         nextConfig.remove('yColumnId');
       } else if (isChartWidget) {
         nextConfig['chartType'] = selectedChartType.value?.name ?? 'bar';
-        nextConfig['xColumnId'] = selectedXAxisColumnId.value!;
+        final String? resolvedXColumnId =
+            selectedXAxisColumnId.value ??
+            current.config['xColumnId']?.toString();
+        if (resolvedXColumnId != null && resolvedXColumnId.isNotEmpty) {
+          nextConfig['xColumnId'] = resolvedXColumnId;
+        }
         final String? y = selectedYAxisColumnId.value;
         if (y == null || y.isEmpty) {
           nextConfig.remove('yColumnId');
@@ -332,7 +353,7 @@ class SettingsWidgetEditController extends GetxController {
       await _saveWidget(
         BuilderWidgetEntity(
           id: current.id,
-          pageId: current.pageId,
+          pageId: selectedPageId.value ?? current.pageId,
           type: current.type,
           config: nextConfig,
         ),
@@ -340,7 +361,18 @@ class SettingsWidgetEditController extends GetxController {
       if (Get.isRegistered<HomeController>()) {
         Get.find<HomeController>().refreshBuilderPageContent();
       }
-      Get.back(result: true);
+      final String targetPageId = selectedPageId.value ?? current.pageId;
+      final String snackbarTitle =
+          titleController.text.trim().isNotEmpty
+              ? titleController.text.trim()
+              : current.config['title']?.toString().trim().isNotEmpty == true
+              ? current.config['title'].toString().trim()
+              : 'Widget';
+      showAppSnackbar('$snackbarTitle Widget', 'Changes saved');
+      Get.offAllNamed<void>(
+        AppRoutes.home,
+        arguments: <String, dynamic>{'selectedPageId': targetPageId},
+      );
     } finally {
       isSaving.value = false;
     }

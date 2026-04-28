@@ -1225,9 +1225,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                                             allowDecimals
                                                 ? (positiveOnly
                                                     ? RegExp(r'^\d*\.?\d*$')
-                                                    : RegExp(
-                                                        r'^-?\d*\.?\d*$',
-                                                      ))
+                                                    : RegExp(r'^-?\d*\.?\d*$'))
                                                 : (positiveOnly
                                                     ? RegExp(r'^\d*$')
                                                     : RegExp(r'^-?\d*$')),
@@ -1258,7 +1256,8 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                                               ? 1
                                               : col.numberStepValue.abs();
                                       final double current =
-                                          double.tryParse(ctrl.text.trim()) ?? 0;
+                                          double.tryParse(ctrl.text.trim()) ??
+                                          0;
                                       double next = current + delta * step;
                                       if (col.numberPositiveOnly && next < 0) {
                                         next = 0;
@@ -1272,57 +1271,63 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                                         next = col.numberMaxValue!;
                                       }
                                       ctrl.text =
-                                          col.numberIntegerOnly || !allowDecimals
+                                          col.numberIntegerOnly ||
+                                                  !allowDecimals
                                               ? next.round().toString()
                                               : next.toString();
                                       validateNow();
                                     }
 
-                                    final InputDecoration decoration =
-                                        InputDecoration(
-                                          labelText: col.name,
-                                          hintText: col.numberFieldHint,
-                                          prefixIcon:
-                                              (col.numberPrefixIconKey != null &&
-                                                      col.numberPrefixIconKey!
-                                                          .isNotEmpty)
-                                                  ? Icon(
-                                                    AppIconRegistry.iconOf(
-                                                      col.numberPrefixIconKey!,
-                                                    ),
-                                                  )
-                                                  : null,
-                                          suffixIcon:
-                                              (col.numberSuffixIconKey != null &&
-                                                      col.numberSuffixIconKey!
-                                                          .isNotEmpty)
-                                                  ? Icon(
-                                                    AppIconRegistry.iconOf(
-                                                      col.numberSuffixIconKey!,
-                                                    ),
-                                                  )
-                                                  : null,
-                                          prefixText:
-                                              (col.numberPrefixIconKey == null ||
-                                                      col.numberPrefixIconKey!
-                                                          .isEmpty)
-                                                  ? col.numberPrefixText
-                                                  : null,
-                                          suffixText:
-                                              (col.numberSuffixIconKey == null ||
-                                                      col.numberSuffixIconKey!
-                                                          .isEmpty)
-                                                  ? col.numberSuffixText
-                                                  : null,
-                                        );
+                                    final InputDecoration
+                                    decoration = InputDecoration(
+                                      labelText: col.name,
+                                      hintText: col.numberFieldHint,
+                                      prefixIcon:
+                                          (col.numberPrefixIconKey != null &&
+                                                  col
+                                                      .numberPrefixIconKey!
+                                                      .isNotEmpty)
+                                              ? Icon(
+                                                AppIconRegistry.iconOf(
+                                                  col.numberPrefixIconKey!,
+                                                ),
+                                              )
+                                              : null,
+                                      suffixIcon:
+                                          (col.numberSuffixIconKey != null &&
+                                                  col
+                                                      .numberSuffixIconKey!
+                                                      .isNotEmpty)
+                                              ? Icon(
+                                                AppIconRegistry.iconOf(
+                                                  col.numberSuffixIconKey!,
+                                                ),
+                                              )
+                                              : null,
+                                      prefixText:
+                                          (col.numberPrefixIconKey == null ||
+                                                  col
+                                                      .numberPrefixIconKey!
+                                                      .isEmpty)
+                                              ? col.numberPrefixText
+                                              : null,
+                                      suffixText:
+                                          (col.numberSuffixIconKey == null ||
+                                                  col
+                                                      .numberSuffixIconKey!
+                                                      .isEmpty)
+                                              ? col.numberSuffixText
+                                              : null,
+                                    );
 
                                     final Widget numberField = TextField(
                                       controller: ctrl,
                                       decoration: decoration,
-                                      keyboardType: TextInputType.numberWithOptions(
-                                        decimal: allowDecimals,
-                                        signed: !positiveOnly,
-                                      ),
+                                      keyboardType:
+                                          TextInputType.numberWithOptions(
+                                            decimal: allowDecimals,
+                                            signed: !positiveOnly,
+                                          ),
                                       inputFormatters: formatters,
                                       onChanged: (_) {
                                         setModalState(validateNow);
@@ -2141,111 +2146,396 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
 
     switch (layout) {
       case CardWidgetLayout.kpi:
-        return Card(
-          elevation: 0,
-          color: cs.surfaceContainerLow,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                if (title.isNotEmpty)
-                  Text(
-                    title.toUpperCase(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: cs.onSurfaceVariant,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                if (title.isNotEmpty) const SizedBox(height: 6),
-                Text(
-                  value.isEmpty ? '—' : value,
-                  maxLines: compact ? 2 : 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: (compact
-                          ? theme.textTheme.headlineSmall
-                          : theme.textTheme.headlineMedium)
-                      ?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: cs.primary,
+      case CardWidgetLayout.info:
+      case CardWidgetLayout.simple:
+      case CardWidgetLayout.customizable:
+      case CardWidgetLayout.hero:
+        final String heroName =
+            card.config['heroCardName']?.toString().trim().isNotEmpty == true
+                ? card.config['heroCardName'].toString().trim()
+                : title;
+        final String heroLabel =
+            card.config['heroLabel']?.toString().trim() ?? 'Balance';
+        final String heroHex =
+            card.config['heroBackgroundHex']?.toString().trim() ?? '#4F46E5';
+        final String heroImagePath =
+            card.config['heroBackgroundImagePath']?.toString().trim() ?? '';
+        final String heroPrefixType =
+            card.config['heroPrefixType']?.toString().trim() ?? 'none';
+        final String heroPrefixText =
+            card.config['heroPrefixText']?.toString().trim() ?? '';
+        final String? heroPrefixIconKey =
+            card.config['heroPrefixIconKey']?.toString().trim();
+        final String heroFormula =
+            card.config['formula']?.toString().trim() ?? '';
+        String heroValue = value;
+        if (heroFormula.isNotEmpty && _allSchemas.isNotEmpty) {
+          final String evaluated = TableFormulaEvaluator.evaluate(
+            formula: heroFormula,
+            currentSchema: _allSchemas.first,
+            workingRowByColId: const <String, dynamic>{},
+            allSchemas: _allSchemas,
+            rowsByTableId: _rowsByTable,
+            forColumnId: '_hero_card',
+          ).trim();
+          if (evaluated.isNotEmpty) {
+            heroValue = evaluated;
+          }
+        }
+        Color baseColor = cs.primary;
+        var normalized = heroHex.replaceAll('#', '').trim();
+        if (normalized.length == 6) {
+          normalized = 'FF$normalized';
+        }
+        final int? parsedHex = int.tryParse(normalized, radix: 16);
+        if (parsedHex != null) {
+          baseColor = Color(parsedHex);
+        }
+        final File? backgroundFile =
+            heroImagePath.isNotEmpty && File(heroImagePath).existsSync()
+                ? File(heroImagePath)
+                : null;
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: Container(
+            constraints: BoxConstraints(minHeight: compact ? 130 : 160),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: <Color>[
+                  baseColor,
+                  Color.lerp(baseColor, Colors.black, 0.28) ?? baseColor,
+                ],
+              ),
+              image:
+                  backgroundFile != null
+                      ? DecorationImage(
+                        image: FileImage(backgroundFile),
+                        fit: BoxFit.cover,
+                        opacity: 0.42,
+                      )
+                      : null,
+            ),
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                final double width = constraints.maxWidth;
+                final bool veryNarrow = width <= 175;
+                final bool narrow = width <= 230;
+                final double bubbleScale =
+                    veryNarrow ? 0.5 : (narrow || compact ? 0.7 : 1.0);
+                final double contentPadding =
+                    veryNarrow ? 10 : (narrow ? 12 : 18);
+                final TextStyle? titleStyle = (veryNarrow
+                        ? theme.textTheme.titleMedium
+                        : narrow
+                        ? theme.textTheme.titleLarge
+                        : theme.textTheme.headlineSmall)
+                    ?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    );
+                final TextStyle? labelStyle = (veryNarrow
+                        ? theme.textTheme.bodySmall
+                        : narrow
+                        ? theme.textTheme.bodyMedium
+                        : theme.textTheme.titleMedium)
+                    ?.copyWith(color: Colors.white.withValues(alpha: 0.85));
+                final TextStyle? valueStyle = (veryNarrow
+                        ? theme.textTheme.titleMedium
+                        : narrow || compact
+                        ? theme.textTheme.headlineSmall
+                        : theme.textTheme.displaySmall)
+                    ?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    );
+                final TextStyle? prefixStyle = (veryNarrow
+                        ? theme.textTheme.titleSmall
+                        : theme.textTheme.headlineMedium)
+                    ?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    );
+
+                return Stack(
+                  children: <Widget>[
+                    Positioned(
+                      right: -20 * bubbleScale,
+                      top: 30 * bubbleScale,
+                      child: _heroBubble(
+                        90 * bubbleScale,
+                        Colors.pinkAccent.withValues(alpha: 0.9),
                       ),
-                ),
-              ],
+                    ),
+                    Positioned(
+                      left: 140 * bubbleScale,
+                      top: 8 * bubbleScale,
+                      child: _heroBubble(
+                        110 * bubbleScale,
+                        Colors.white.withValues(alpha: 0.16),
+                      ),
+                    ),
+                    Positioned(
+                      left: 65 * bubbleScale,
+                      top: 28 * bubbleScale,
+                      child: _heroBubble(
+                        140 * bubbleScale,
+                        Colors.black.withValues(alpha: 0.12),
+                      ),
+                    ),
+                    Positioned(
+                      left: 24 * bubbleScale,
+                      bottom: -50 * bubbleScale,
+                      child: _heroBubble(
+                        180 * bubbleScale,
+                        Colors.white.withValues(alpha: 0.1),
+                      ),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.all(contentPadding),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: <Widget>[
+                          Text(
+                            heroName.isEmpty ? 'Card' : heroName,
+                            maxLines: veryNarrow ? 2 : 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: titleStyle,
+                          ),
+                          SizedBox(height: veryNarrow ? 4 : 8),
+                          Text(
+                            heroLabel.isEmpty ? 'Balance' : heroLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: labelStyle,
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: <Widget>[
+                              if (heroPrefixType == 'text' &&
+                                  heroPrefixText.isNotEmpty)
+                                Text(heroPrefixText, style: prefixStyle),
+                              if (heroPrefixType == 'icon' &&
+                                  heroPrefixIconKey != null &&
+                                  heroPrefixIconKey.isNotEmpty) ...<Widget>[
+                                Icon(
+                                  AppIconRegistry.iconOf(heroPrefixIconKey),
+                                  color: Colors.white,
+                                  size: veryNarrow ? 18 : 24,
+                                ),
+                                const SizedBox(width: 6),
+                              ],
+                              Expanded(
+                                child: Text(
+                                  heroValue.isEmpty ? '—' : heroValue,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: valueStyle,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         );
-      case CardWidgetLayout.info:
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Icon(Icons.insights_outlined, color: cs.primary, size: 32),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+      case CardWidgetLayout.percent:
+        final String percentName =
+            card.config['percentCardName']?.toString().trim().isNotEmpty == true
+                ? card.config['percentCardName'].toString().trim()
+                : title;
+        final String percentLabel =
+            card.config['percentLabel']?.toString().trim() ?? 'invoice.docx';
+        final String percentHex =
+            card.config['percentBackgroundHex']?.toString().trim() ?? '#2F80ED';
+        final String percentImagePath =
+            card.config['percentBackgroundImagePath']?.toString().trim() ?? '';
+        final String? percentIconKey =
+            card.config['percentIconKey']?.toString().trim();
+        final String percentFormula =
+            card.config['percentFormula']?.toString().trim() ??
+            card.config['formula']?.toString().trim() ??
+            '';
+        double resolvedPercent =
+            (card.config['percentValue'] as num?)?.toDouble() ??
+            _toDouble(value) ??
+            0;
+        if (percentFormula.isNotEmpty && _allSchemas.isNotEmpty) {
+          final String evaluated = TableFormulaEvaluator.evaluate(
+            formula: percentFormula,
+            currentSchema: _allSchemas.first,
+            workingRowByColId: const <String, dynamic>{},
+            allSchemas: _allSchemas,
+            rowsByTableId: _rowsByTable,
+            forColumnId: '_percent_card',
+          );
+          final double? numeric = _toDouble(evaluated);
+          if (numeric != null) {
+            resolvedPercent = numeric;
+          }
+        }
+        final double percent = resolvedPercent.clamp(0, 100);
+        Color percentBaseColor = const Color(0xFF2F80ED);
+        var percentNormalized = percentHex.replaceAll('#', '').trim();
+        if (percentNormalized.length == 6) {
+          percentNormalized = 'FF$percentNormalized';
+        }
+        final int? percentParsed = int.tryParse(percentNormalized, radix: 16);
+        if (percentParsed != null) {
+          percentBaseColor = Color(percentParsed);
+        }
+        final File? percentBackgroundFile =
+            percentImagePath.isNotEmpty && File(percentImagePath).existsSync()
+                ? File(percentImagePath)
+                : null;
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: Container(
+            constraints: BoxConstraints(minHeight: compact ? 130 : 160),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: <Color>[
+                  percentBaseColor,
+                  Color.lerp(percentBaseColor, Colors.black, 0.18) ??
+                      percentBaseColor,
+                ],
+              ),
+              image:
+                  percentBackgroundFile != null
+                      ? DecorationImage(
+                        image: FileImage(percentBackgroundFile),
+                        fit: BoxFit.cover,
+                        opacity: 0.3,
+                      )
+                      : null,
+            ),
+            child: Padding(
+              padding: EdgeInsets.all(compact ? 12 : 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Row(
                     children: <Widget>[
-                      if (title.isNotEmpty)
-                        Text(
-                          title,
+                      _percentFileTilePill(
+                        compact: compact,
+                        iconKey: percentIconKey,
+                      ),
+                      SizedBox(width: compact ? 8 : 12),
+                      Expanded(
+                        child: Text(
+                          percentName.isEmpty ? 'Uploading' : percentName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            color: cs.onSurfaceVariant,
-                          ),
+                          style: (compact
+                                  ? theme.textTheme.titleMedium
+                                  : theme.textTheme.titleLarge)
+                              ?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w500,
+                              ),
                         ),
-                      if (title.isNotEmpty) const SizedBox(height: 4),
-                      Text(
-                        value.isEmpty ? '—' : value,
-                        maxLines: compact ? 2 : 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: (compact
-                                ? theme.textTheme.titleMedium
-                                : theme.textTheme.titleLarge)
-                            ?.copyWith(fontWeight: FontWeight.w600),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-          ),
-        );
-      case CardWidgetLayout.simple:
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                if (title.isNotEmpty)
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: cs.onSurfaceVariant,
+                  SizedBox(height: compact ? 12 : 16),
+                  LinearProgressIndicator(
+                    minHeight: compact ? 4 : 5,
+                    value: percent / 100,
+                    backgroundColor: Colors.white.withValues(alpha: 0.22),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      Colors.white,
                     ),
                   ),
-                if (title.isNotEmpty) const SizedBox(height: 8),
-                Text(
-                  value.isEmpty ? '—' : value,
-                  maxLines: compact ? 2 : 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: (compact
-                          ? theme.textTheme.titleLarge
-                          : theme.textTheme.headlineSmall)
-                      ?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ],
+                  SizedBox(height: compact ? 8 : 12),
+                  Row(
+                    children: <Widget>[
+                      Text(
+                        '${percent.toStringAsFixed(0)}%',
+                        style: (compact
+                                ? theme.textTheme.titleLarge
+                                : theme.textTheme.headlineSmall)
+                            ?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const Spacer(),
+                      Expanded(
+                        child: Text(
+                          percentLabel.isEmpty ? 'invoice.docx' : percentLabel,
+                          textAlign: TextAlign.end,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: (compact
+                                  ? theme.textTheme.bodyMedium
+                                  : theme.textTheme.titleLarge)
+                              ?.copyWith(
+                                color: Colors.white.withValues(alpha: 0.72),
+                                fontWeight: FontWeight.w400,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         );
     }
+  }
+
+  Widget _percentFileTilePill({required bool compact, String? iconKey}) {
+    return Container(
+      width: compact ? 28 : 34,
+      height: compact ? 28 : 34,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(compact ? 9 : 11),
+      ),
+      child: Stack(
+        children: <Widget>[
+          Center(
+            child: Icon(
+              iconKey == null || iconKey.isEmpty
+                  ? Icons.description_outlined
+                  : AppIconRegistry.iconOf(iconKey),
+              color: Colors.white,
+              size: compact ? 16 : 18,
+            ),
+          ),
+          Positioned(
+            right: compact ? 4 : 5,
+            bottom: compact ? 3 : 4,
+            child: Text(
+              '2',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.95),
+                fontSize: compact ? 8 : 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _heroBubble(double size, Color color) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
   }
 
   Widget _buildChartSection(

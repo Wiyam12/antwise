@@ -88,10 +88,12 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
 
   /// Id of the table being edited (excluded from "other table" dropdown sources).
   String? get editingTableId => _schema?.id;
+
   /// Exposed for the edit wizard (summary config, review).
   TableSchemaEntity? get editingSchema => _schema;
   bool get isSummaryTable => _schema?.tableKind == TableKind.summary;
-  bool get isReadOnlyTable => !isSummaryTable && mode.value == TableMode.readOnly;
+  bool get isReadOnlyTable =>
+      !isSummaryTable && mode.value == TableMode.readOnly;
 
   bool get isCrudStandardTable =>
       _schema?.tableKind == TableKind.standard && mode.value == TableMode.crud;
@@ -106,8 +108,7 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
     return 4;
   }
 
-  TableListDesignLayout? get persistedListDesign =>
-      _schema?.listDesignLayout;
+  TableListDesignLayout? get persistedListDesign => _schema?.listDesignLayout;
 
   List<TableSchemaEntity> get affectingTargetTableOptions {
     return existingTableSchemas
@@ -180,9 +181,7 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
 
   List<TableColumnEntity> get inventoryStockNumericColumns {
     return inventoryStockTableColumns
-        .where(
-          (TableColumnEntity c) => c.type == TableColumnType.number,
-        )
+        .where((TableColumnEntity c) => c.type == TableColumnType.number)
         .toList(growable: false);
   }
 
@@ -201,9 +200,7 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
 
   List<EditColumnDraft> get inventoryLineQuantityCandidates {
     return columns
-        .where(
-          (EditColumnDraft c) => c.type.value == TableColumnType.number,
-        )
+        .where((EditColumnDraft c) => c.type.value == TableColumnType.number)
         .toList(growable: false);
   }
 
@@ -265,8 +262,9 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
 
   @override
   void onClose() {
-    final List<EditReadOnlyRowDraft> readOnlyRows =
-        readOnlyRowsDrafts.toList(growable: false);
+    final List<EditReadOnlyRowDraft> readOnlyRows = readOnlyRowsDrafts.toList(
+      growable: false,
+    );
     readOnlyRowsDrafts.clear();
     final List<EditReadOnlyCellDraft> mappingCells = readOnlyPopulateMapping
         .cells
@@ -300,9 +298,7 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       pageOptions.assignAll(
         pages
             .where((BuilderPageEntity p) => !p.isDeleted)
-            .map(
-              (BuilderPageEntity p) => PageOption(id: p.id, name: p.name),
-            )
+            .map((BuilderPageEntity p) => PageOption(id: p.id, name: p.name))
             .toList(growable: false),
       );
     } catch (_) {
@@ -313,12 +309,11 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
     descriptionController.text = schema.description;
     selectedPageId.value = schema.pageId;
     mode.value = schema.mode;
-    swipeToDelete.value = schema.swipeToDelete ||
-        schema.layoutType == TableLayoutType.swipe;
+    swipeToDelete.value =
+        schema.swipeToDelete || schema.layoutType == TableLayoutType.swipe;
     productDisplayMode.value = schema.productDisplayMode;
-    selectedVisualLayoutKey.value = CreateTableController.visualLayoutKeyForDesign(
-      schema.listDesignLayout,
-    );
+    selectedVisualLayoutKey.value =
+        CreateTableController.visualLayoutKeyForDesign(schema.listDesignLayout);
     searchEnabled.value = schema.searchEnabled;
     dataLoadingMode.value = schema.dataLoadingMode;
     pageSize.value = schema.pageSize;
@@ -388,6 +383,7 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       _loadRows();
     }
   }
+
   void setSearchEnabled(bool value) => searchEnabled.value = value;
   void setDataLoadingMode(TableDataLoadingMode value) =>
       dataLoadingMode.value = value;
@@ -401,15 +397,14 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       final AffectingTableDraft draft = AffectingTableDraft(
         id: _uuid.v4(),
         rules: cfg.rules
-            .map(
-              (TableAffectedColumnRule r) {
-                final AffectingColumnRuleDraft rule =
-                    AffectingColumnRuleDraft(id: _uuid.v4());
-                rule.targetColumnId.value = r.targetColumnId;
-                rule.formulaController.text = r.formula;
-                return rule;
-              },
-            )
+            .map((TableAffectedColumnRule r) {
+              final AffectingColumnRuleDraft rule = AffectingColumnRuleDraft(
+                id: _uuid.v4(),
+              );
+              rule.targetColumnId.value = r.targetColumnId;
+              rule.formulaController.text = r.formula;
+              return rule;
+            })
             .toList(growable: false),
       );
       draft.targetTableId.value = cfg.targetTableId;
@@ -637,8 +632,9 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
   }
 
   void _bootstrapReadOnlyDraftsFromRows() {
-    final List<EditReadOnlyRowDraft> previousRows =
-        readOnlyRowsDrafts.toList(growable: false);
+    final List<EditReadOnlyRowDraft> previousRows = readOnlyRowsDrafts.toList(
+      growable: false,
+    );
     readOnlyRowsDrafts.clear();
     if (previousRows.isNotEmpty) {
       _scheduleDisposeReadOnlyRows(previousRows);
@@ -753,15 +749,17 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
         .where((String id) => !colIds.contains(id))
         .toList(growable: false);
     for (final String id in staleMap) {
-      final EditReadOnlyCellDraft? removed = readOnlyPopulateMapping.cells.remove(
-        id,
-      );
+      final EditReadOnlyCellDraft? removed = readOnlyPopulateMapping.cells
+          .remove(id);
       if (removed != null) {
         _disposeReadOnlyCellLater(removed);
       }
     }
     for (final EditColumnDraft c in columns) {
-      readOnlyPopulateMapping.cells.putIfAbsent(c.id, () => EditReadOnlyCellDraft());
+      readOnlyPopulateMapping.cells.putIfAbsent(
+        c.id,
+        () => EditReadOnlyCellDraft(),
+      );
     }
   }
 
@@ -927,34 +925,40 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       return const <Map<String, dynamic>>[];
     }
     final List<TableSchemaEntity> schemas = _formulaSchemaCache;
-    final Map<String, TableSchemaEntity> schemaById = <String, TableSchemaEntity>{
-      for (final TableSchemaEntity s in schemas) s.id: s,
-    };
-    final Map<String, List<TableRowEntity>> rowsByTable = <String, List<TableRowEntity>>{};
+    final Map<String, TableSchemaEntity> schemaById =
+        <String, TableSchemaEntity>{
+          for (final TableSchemaEntity s in schemas) s.id: s,
+        };
+    final Map<String, List<TableRowEntity>> rowsByTable =
+        <String, List<TableRowEntity>>{};
     for (final TableSchemaEntity s in schemas) {
       rowsByTable[s.id] = await _getRows(s.id);
     }
     final TableSchemaEntity? keySchema = schemaById[keyTableId];
     if (keySchema == null) return const <Map<String, dynamic>>[];
-    final List<TableRowEntity> keyRows = rowsByTable[keyTableId] ?? const <TableRowEntity>[];
+    final List<TableRowEntity> keyRows =
+        rowsByTable[keyTableId] ?? const <TableRowEntity>[];
     final Set<String> seen = <String>{};
     final List<Map<String, dynamic>> generated = <Map<String, dynamic>>[];
     for (final TableRowEntity sourceRow in keyRows) {
-      final Map<String, dynamic> resolvedKey = TableFormulaEvaluator.resolveRowValues(
-        schema: keySchema,
-        row: sourceRow,
-        allSchemas: schemas,
-        rowsByTableId: rowsByTable,
-      );
-      final String keyValue = (resolvedKey[keyColumnId] ?? sourceRow.values[keyColumnId] ?? '')
-          .toString()
-          .trim();
+      final Map<String, dynamic> resolvedKey =
+          TableFormulaEvaluator.resolveRowValues(
+            schema: keySchema,
+            row: sourceRow,
+            allSchemas: schemas,
+            rowsByTableId: rowsByTable,
+          );
+      final String keyValue =
+          (resolvedKey[keyColumnId] ?? sourceRow.values[keyColumnId] ?? '')
+              .toString()
+              .trim();
       if (keyValue.isEmpty || seen.contains(keyValue)) continue;
       seen.add(keyValue);
       final Map<String, dynamic> rowValues = <String, dynamic>{};
       for (final EditColumnDraft targetColumn in columns) {
         final EditReadOnlyCellDraft cell =
-            readOnlyPopulateMapping.cells[targetColumn.id] ?? EditReadOnlyCellDraft();
+            readOnlyPopulateMapping.cells[targetColumn.id] ??
+            EditReadOnlyCellDraft();
         switch (cell.source.value) {
           case EditReadOnlyValueSource.manual:
             rowValues[targetColumn.id] = <String, dynamic>{
@@ -1184,7 +1188,9 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       formulaFieldErrors.remove(columnId);
       return;
     }
-    final List<GuidedFormulaColumnLike> sibs = siblingColumnsExcluding(columnId);
+    final List<GuidedFormulaColumnLike> sibs = siblingColumnsExcluding(
+      columnId,
+    );
     final Map<String, String> guidedErrors = col.guided.validateGuided(
       _formulaSchemaCache,
       sibs,
@@ -1372,10 +1378,11 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
         }
         continue;
       }
-      final List<GuidedFormulaColumnLike> sibs = siblingColumnsExcluding(col.id);
+      final List<GuidedFormulaColumnLike> sibs = siblingColumnsExcluding(
+        col.id,
+      );
       if (col.guided.guidedFormulaKind.value != null) {
-        final Map<String, String> guidedErrors =
-            col.guided.validateGuided(
+        final Map<String, String> guidedErrors = col.guided.validateGuided(
           _formulaSchemaCache,
           sibs,
           col.id,
@@ -1855,9 +1862,10 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       }
       if (col.dropdownSourceKind.value ==
           TableColumnDropdownSourceKind.manual) {
-        final List<String> opts = DropdownColumnOptions.manualOptionsFromMultiline(
-          col.dropdownOptionsController.text,
-        );
+        final List<String> opts =
+            DropdownColumnOptions.manualOptionsFromMultiline(
+              col.dropdownOptionsController.text,
+            );
         if (opts.isEmpty) {
           dropdownFieldErrors[col.id] = 'At least one option is required.';
         }
@@ -1873,10 +1881,7 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
     }
     dropdownFieldErrors.refresh();
     if (dropdownFieldErrors.isNotEmpty) {
-      showAppSnackbar(
-        'Validation',
-        dropdownFieldErrors.values.first,
-      );
+      showAppSnackbar('Validation', dropdownFieldErrors.values.first);
       return;
     }
     for (final EditColumnDraft col in columns) {
@@ -1967,7 +1972,8 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       final bool swipe = swipeToDelete.value;
       final String pageId = selectedPageId.value ?? current.pageId;
       final String desc = descriptionController.text.trim();
-      final List<TableAffectingConfig> affectingCfg = _buildAffectingTablesConfig();
+      final List<TableAffectingConfig> affectingCfg =
+          _buildAffectingTablesConfig();
       await _save(
         TableSchemaEntity(
           id: current.id,
@@ -2010,14 +2016,15 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
         lazyInitialLoad: lazyInitialLoad.value,
         columns: updatedColumns,
       );
-      if (savedMode == TableMode.readOnly && current.tableKind != TableKind.summary) {
+      if (savedMode == TableMode.readOnly &&
+          current.tableKind != TableKind.summary) {
         await _persistReadOnlyRowsData(
           showSuccessMessage: false,
           rehydrateDrafts: false,
         );
       }
       isSaving.value = false;
-      showAppSnackbar('Table', 'Changes saved');
+      showAppSnackbar('$tableName Table', 'Changes saved');
       await Future<void>.delayed(const Duration(milliseconds: 450));
       if (isClosed) {
         return;
@@ -2089,7 +2096,8 @@ class EditColumnDraft implements GuidedFormulaColumnLike {
     draft.nameController.text = entity.name;
     final bool hasFormulaPayload =
         (entity.formula ?? '').trim().isNotEmpty ||
-        (entity.formulaDefinition != null && entity.formulaDefinition!.isNotEmpty);
+        (entity.formulaDefinition != null &&
+            entity.formulaDefinition!.isNotEmpty);
     draft.type.value =
         hasFormulaPayload ? TableColumnType.formula : entity.type;
     draft.includeInCreate.value = entity.includeInCreateForm;
@@ -2106,11 +2114,9 @@ class EditColumnDraft implements GuidedFormulaColumnLike {
         DropdownColumnOptions.manualOptionsToMultiline(entity.dropdownOptions);
     draft.textHintController.text = entity.textFieldHint ?? '';
     final String? pfx = entity.textPrefixIconKey;
-    draft.textPrefixIconKey.value =
-        pfx != null && pfx.isNotEmpty ? pfx : null;
+    draft.textPrefixIconKey.value = pfx != null && pfx.isNotEmpty ? pfx : null;
     final String? sfx = entity.textSuffixIconKey;
-    draft.textSuffixIconKey.value =
-        sfx != null && sfx.isNotEmpty ? sfx : null;
+    draft.textSuffixIconKey.value = sfx != null && sfx.isNotEmpty ? sfx : null;
     draft.textValidationKind.value = entity.textValidationKind;
     draft.textCustomRegexController.text = entity.textCustomRegex ?? '';
     draft.numberHintController.text = entity.numberFieldHint ?? '';
@@ -2161,8 +2167,9 @@ class EditColumnDraft implements GuidedFormulaColumnLike {
   final TextEditingController numberSuffixController = TextEditingController();
   final TextEditingController numberMinController = TextEditingController();
   final TextEditingController numberMaxController = TextEditingController();
-  final TextEditingController numberStepController =
-      TextEditingController(text: '1');
+  final TextEditingController numberStepController = TextEditingController(
+    text: '1',
+  );
   final TextEditingController formulaController = TextEditingController();
   final TextEditingController formulaTextController = TextEditingController();
   final Rx<FormulaInputMode> formulaInputMode = FormulaInputMode.guided.obs;
@@ -2247,18 +2254,20 @@ class EditColumnDraft implements GuidedFormulaColumnLike {
       includeInEditForm: includeInEdit.value,
       isRequired: isRequired.value,
       isUnique: isUnique.value,
-      pattern: patternController.text.trim().isEmpty
-          ? null
-          : patternController.text.trim(),
-      formula: type.value == TableColumnType.formula
-          ? (formulaInputMode.value == FormulaInputMode.textEditor
-              ? (formulaTextController.text.trim().isEmpty
-                  ? null
-                  : formulaTextController.text.trim())
-              : (formulaController.text.trim().isEmpty
-                  ? null
-                  : formulaController.text.trim()))
-          : null,
+      pattern:
+          patternController.text.trim().isEmpty
+              ? null
+              : patternController.text.trim(),
+      formula:
+          type.value == TableColumnType.formula
+              ? (formulaInputMode.value == FormulaInputMode.textEditor
+                  ? (formulaTextController.text.trim().isEmpty
+                      ? null
+                      : formulaTextController.text.trim())
+                  : (formulaController.text.trim().isEmpty
+                      ? null
+                      : formulaController.text.trim()))
+              : null,
       formulaDefinition:
           type.value == TableColumnType.formula
               ? (formulaInputMode.value == FormulaInputMode.guided
@@ -2266,56 +2275,65 @@ class EditColumnDraft implements GuidedFormulaColumnLike {
                   : null)
               : null,
       dropdownOptions: _dropdownOptionsForEntity(),
-      dropdownSourceKind: type.value == TableColumnType.dropdown
-          ? dropdownSourceKind.value
-          : TableColumnDropdownSourceKind.manual,
-      dropdownSourceTableId: type.value == TableColumnType.dropdown &&
-              dropdownSourceKind.value == TableColumnDropdownSourceKind.table
-          ? dropdownSourceTableId.value
-          : null,
-      dropdownSourceColumnId: type.value == TableColumnType.dropdown &&
-              dropdownSourceKind.value == TableColumnDropdownSourceKind.table
-          ? dropdownSourceColumnId.value
-          : null,
-      textFieldHint: type.value == TableColumnType.text
-          ? (textHintController.text.trim().isEmpty
-              ? null
-              : textHintController.text.trim())
-          : null,
-      textPrefixIconKey: type.value == TableColumnType.text
-          ? textPrefixIconKey.value
-          : null,
-      textSuffixIconKey: type.value == TableColumnType.text
-          ? textSuffixIconKey.value
-          : null,
-      textValidationKind: type.value == TableColumnType.text
-          ? textValidationKind.value
-          : TableTextValidationKind.none,
-      textCustomRegex: type.value == TableColumnType.text &&
-              textValidationKind.value == TableTextValidationKind.custom
-          ? (textCustomRegexController.text.trim().isEmpty
-              ? null
-              : textCustomRegexController.text.trim())
-          : null,
-      numberFieldHint: type.value == TableColumnType.number
-          ? (numberHintController.text.trim().isEmpty
-              ? null
-              : numberHintController.text.trim())
-          : null,
-      numberPrefixText: type.value == TableColumnType.number
-          ? (numberPrefixUseIcon.value
-              ? null
-              : (numberPrefixController.text.trim().isEmpty
+      dropdownSourceKind:
+          type.value == TableColumnType.dropdown
+              ? dropdownSourceKind.value
+              : TableColumnDropdownSourceKind.manual,
+      dropdownSourceTableId:
+          type.value == TableColumnType.dropdown &&
+                  dropdownSourceKind.value ==
+                      TableColumnDropdownSourceKind.table
+              ? dropdownSourceTableId.value
+              : null,
+      dropdownSourceColumnId:
+          type.value == TableColumnType.dropdown &&
+                  dropdownSourceKind.value ==
+                      TableColumnDropdownSourceKind.table
+              ? dropdownSourceColumnId.value
+              : null,
+      textFieldHint:
+          type.value == TableColumnType.text
+              ? (textHintController.text.trim().isEmpty
                   ? null
-                  : numberPrefixController.text.trim()))
-          : null,
-      numberSuffixText: type.value == TableColumnType.number
-          ? (numberSuffixUseIcon.value
-              ? null
-              : (numberSuffixController.text.trim().isEmpty
+                  : textHintController.text.trim())
+              : null,
+      textPrefixIconKey:
+          type.value == TableColumnType.text ? textPrefixIconKey.value : null,
+      textSuffixIconKey:
+          type.value == TableColumnType.text ? textSuffixIconKey.value : null,
+      textValidationKind:
+          type.value == TableColumnType.text
+              ? textValidationKind.value
+              : TableTextValidationKind.none,
+      textCustomRegex:
+          type.value == TableColumnType.text &&
+                  textValidationKind.value == TableTextValidationKind.custom
+              ? (textCustomRegexController.text.trim().isEmpty
                   ? null
-                  : numberSuffixController.text.trim()))
-          : null,
+                  : textCustomRegexController.text.trim())
+              : null,
+      numberFieldHint:
+          type.value == TableColumnType.number
+              ? (numberHintController.text.trim().isEmpty
+                  ? null
+                  : numberHintController.text.trim())
+              : null,
+      numberPrefixText:
+          type.value == TableColumnType.number
+              ? (numberPrefixUseIcon.value
+                  ? null
+                  : (numberPrefixController.text.trim().isEmpty
+                      ? null
+                      : numberPrefixController.text.trim()))
+              : null,
+      numberSuffixText:
+          type.value == TableColumnType.number
+              ? (numberSuffixUseIcon.value
+                  ? null
+                  : (numberSuffixController.text.trim().isEmpty
+                      ? null
+                      : numberSuffixController.text.trim()))
+              : null,
       numberPrefixIconKey:
           type.value == TableColumnType.number && numberPrefixUseIcon.value
               ? numberPrefixIconKey.value
@@ -2324,27 +2342,34 @@ class EditColumnDraft implements GuidedFormulaColumnLike {
           type.value == TableColumnType.number && numberSuffixUseIcon.value
               ? numberSuffixIconKey.value
               : null,
-      numberMinValue: type.value == TableColumnType.number
-          ? double.tryParse(numberMinController.text.trim())
-          : null,
-      numberMaxValue: type.value == TableColumnType.number
-          ? double.tryParse(numberMaxController.text.trim())
-          : null,
-      numberAllowDecimals: type.value == TableColumnType.number
-          ? numberAllowDecimals.value
-          : true,
-      numberIntegerOnly: type.value == TableColumnType.number
-          ? numberIntegerOnly.value
-          : false,
-      numberPositiveOnly: type.value == TableColumnType.number
-          ? numberPositiveOnly.value
-          : false,
-      numberShowStepper: type.value == TableColumnType.number
-          ? numberShowStepper.value
-          : false,
-      numberStepValue: type.value == TableColumnType.number
-          ? (double.tryParse(numberStepController.text.trim()) ?? 1)
-          : 1,
+      numberMinValue:
+          type.value == TableColumnType.number
+              ? double.tryParse(numberMinController.text.trim())
+              : null,
+      numberMaxValue:
+          type.value == TableColumnType.number
+              ? double.tryParse(numberMaxController.text.trim())
+              : null,
+      numberAllowDecimals:
+          type.value == TableColumnType.number
+              ? numberAllowDecimals.value
+              : true,
+      numberIntegerOnly:
+          type.value == TableColumnType.number
+              ? numberIntegerOnly.value
+              : false,
+      numberPositiveOnly:
+          type.value == TableColumnType.number
+              ? numberPositiveOnly.value
+              : false,
+      numberShowStepper:
+          type.value == TableColumnType.number
+              ? numberShowStepper.value
+              : false,
+      numberStepValue:
+          type.value == TableColumnType.number
+              ? (double.tryParse(numberStepController.text.trim()) ?? 1)
+              : 1,
     );
   }
 

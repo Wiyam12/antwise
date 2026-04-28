@@ -48,10 +48,6 @@ class SettingsPageLayoutEditPage
                 if (c.key == SettingsPageLayoutEditController.widgetsKey) {
                   final List<BuilderWidgetEntity> cards = controller.widgetCards
                       .toList(growable: false);
-                  final int perRow = controller.widgetGridCount.value.clamp(
-                    1,
-                    3,
-                  );
                   return Card(
                     key: ValueKey<String>(c.key),
                     child: Padding(
@@ -81,22 +77,33 @@ class SettingsPageLayoutEditPage
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 8),
-                          SegmentedButton<int>(
-                            segments: const <ButtonSegment<int>>[
-                              ButtonSegment<int>(value: 1, label: Text('1')),
-                              ButtonSegment<int>(value: 2, label: Text('2')),
-                              ButtonSegment<int>(value: 3, label: Text('3')),
-                            ],
-                            selected: <int>{controller.widgetGridCount.value},
-                            onSelectionChanged: (Set<int> next) {
-                              if (next.isEmpty) {
-                                return;
-                              }
-                              controller.setWidgetGridCount(next.first);
-                            },
-                          ),
+                          Obx(() {
+                            final int boundedGridCount = controller
+                                .widgetGridCount
+                                .value
+                                .clamp(1, 3);
+                            return SegmentedButton<int>(
+                              segments: const <ButtonSegment<int>>[
+                                ButtonSegment<int>(value: 1, label: Text('1')),
+                                ButtonSegment<int>(value: 2, label: Text('2')),
+                                ButtonSegment<int>(value: 3, label: Text('3')),
+                              ],
+                              selected: <int>{boundedGridCount},
+                              onSelectionChanged: (Set<int> next) {
+                                if (next.isEmpty) {
+                                  return;
+                                }
+                                controller.setWidgetGridCount(next.first);
+                              },
+                            );
+                          }),
                           const SizedBox(height: 10),
-                          _buildWidgetsPreviewGrid(cards, perRow),
+                          Obx(
+                            () => _buildWidgetsPreviewGrid(
+                              cards,
+                              controller.widgetGridCount.value.clamp(1, 3),
+                            ),
+                          ),
                         ],
                       ),
                     ),

@@ -537,6 +537,8 @@ class _EvalParser {
         return _parseAggregate(_Agg.count);
       case 'AVG':
         return _parseAggregate(_Agg.avg);
+      case 'COUNTIF':
+        return _parseCountIfArgs();
       default:
         throw FormatException('fn');
     }
@@ -598,6 +600,41 @@ class _EvalParser {
   }
 
   dynamic _parseAggregate(_Agg kind) {
+    final int argStart = _i;
+    if (argStart >= tokens.length) {
+      throw FormatException('aggregate');
+    }
+    final int argEnd = _findExpressionEndAtCurrentDepth();
+    if (argEnd < argStart) {
+      throw FormatException('aggregate');
+    }
+
+    // Fast path: SUM(Table.Col), COUNT(Table.Col), AVG(Table.Col)
+    if (argEnd == argStart + 2 &&
+        (tokens[argStart].type == _Tk.ident ||
+            tokens[argStart].type == _Tk.string) &&
+        tokens[argStart + 1].type == _Tk.dot &&
+        (tokens[argStart + 2].type == _Tk.ident ||
+            tokens[argStart + 2].type == _Tk.string)) {
+      final String tablePart = tokens[argStart].lexeme;
+      final String colPart = tokens[argStart + 2].lexeme;
+      _i = argEnd + 1;
+      if (!_match(_Tk.rpar)) {
+        throw FormatException(')');
+      }
+      return _runAggregate(kind, tablePart, colPart);
+    }
+
+    // Generic path: SUM(IF(...)), AVG(IF(...)), COUNT(IF(...)) etc.
+    final List<_Token> argTokens = tokens.sublist(argStart, argEnd + 1);
+    _i = argEnd + 1;
+    if (!_match(_Tk.rpar)) {
+      throw FormatException(')');
+    }
+    return _runAggregateExpression(kind, argTokens);
+  }
+
+  dynamic _parseCountIfArgs() {
     if (!_check(_Tk.ident) && !_check(_Tk.string)) {
       throw FormatException('table');
     }
@@ -607,10 +644,14 @@ class _EvalParser {
       throw FormatException('.');
     }
     final String colPart = _readNameToken();
+    if (!_match(_Tk.comma)) {
+      throw FormatException(',');
+    }
+    final dynamic expected = parseExpression();
     if (!_match(_Tk.rpar)) {
       throw FormatException(')');
     }
-    return _runAggregate(kind, tablePart, colPart);
+    return _runCountIf(tablePart, colPart, expected);
   }
 
   dynamic _runLookup(
@@ -720,6 +761,157 @@ class _EvalParser {
     return nums.reduce((double a, double b) => a + b) / nums.length;
   }
 
+  int _findExpressionEndAtCurrentDepth() {
+    int depth = 0;
+    for (int i = _i; i < tokens.length; i++) {
+      final _Tk type = tokens[i].type;
+      if (type == _Tk.lpar) {
+        depth++;
+        continue;
+      }
+      if (type == _Tk.rpar) {
+        if (depth == 0) {
+          return i - 1;
+        }
+        depth--;
+      }
+    }
+    return -1;
+  }
+
+  dynamic _runAggregateExpression(_Agg kind, List<_Token> argTokens) {
+    final TableSchemaEntity baseSchema = _inferAggregateBaseSchema(argTokens);
+    final List<TableRowEntity> rows =
+        rowsByTableId[baseSchema.id] ?? <TableRowEntity>[];
+    if (rows.isEmpty) {
+      return kind == _Agg.count ? 0 : 0.0;
+    }
+
+    int count = 0;
+    final List<double> nums = <double>[];
+    for (final TableRowEntity row in rows) {
+      final Map<String, dynamic> resolved = TableFormulaEvaluator.resolveRowValues(
+        schema: baseSchema,
+        row: row,
+        allSchemas: allSchemas,
+        rowsByTableId: rowsByTableId,
+        remainingDepth: remainingDepth - 1,
+      );
+      final dynamic value = _evaluateAggregateArgForRow(
+        argTokens: argTokens,
+        schema: baseSchema,
+        rowValues: resolved,
+      );
+      if (kind == _Agg.count) {
+        final String s = TableFormulaEvaluator._stringify(value).trim();
+        if (s.isNotEmpty) {
+          count++;
+        }
+        continue;
+      }
+      nums.add(_toNum(value).toDouble());
+    }
+
+    if (kind == _Agg.count) {
+      return count;
+    }
+    if (nums.isEmpty) {
+      return 0.0;
+    }
+    if (kind == _Agg.sum) {
+      return nums.reduce((double a, double b) => a + b);
+    }
+    return nums.reduce((double a, double b) => a + b) / nums.length;
+  }
+
+  TableSchemaEntity _inferAggregateBaseSchema(List<_Token> argTokens) {
+    for (int i = 0; i + 2 < argTokens.length; i++) {
+      final _Token a = argTokens[i];
+      final _Token dot = argTokens[i + 1];
+      if ((a.type == _Tk.ident || a.type == _Tk.string) &&
+          dot.type == _Tk.dot) {
+        final TableSchemaEntity? schema = _schemaByTableName(a.lexeme);
+        if (schema != null) {
+          return schema;
+        }
+      }
+    }
+    return currentSchema;
+  }
+
+  dynamic _evaluateAggregateArgForRow({
+    required List<_Token> argTokens,
+    required TableSchemaEntity schema,
+    required Map<String, dynamic> rowValues,
+  }) {
+    final _EvalParser parser = _EvalParser(
+      tokens: <_Token>[...argTokens, const _Token(_Tk.end, '')],
+      currentSchema: schema,
+      workingRowByColId: rowValues,
+      allSchemas: allSchemas,
+      rowsByTableId: rowsByTableId,
+      evaluatingColumnId: evaluatingColumnId,
+      remainingDepth: remainingDepth - 1,
+    );
+    final dynamic value = parser.parseExpression();
+    parser.expectEnd();
+    return value;
+  }
+
+  int _runCountIf(String tablePart, String colPart, dynamic expectedRaw) {
+    final TableSchemaEntity? target = _schemaByTableName(tablePart);
+    if (target == null) {
+      return 0;
+    }
+    final String? colId = _columnIdByName(target, colPart);
+    if (colId == null) {
+      return 0;
+    }
+    final List<TableRowEntity> rows =
+        rowsByTableId[target.id] ?? <TableRowEntity>[];
+    final dynamic expected = _normalizeCountIfOperand(expectedRaw);
+    int count = 0;
+    for (final TableRowEntity row in rows) {
+      final Map<String, dynamic> resolved = TableFormulaEvaluator.resolveRowValues(
+        schema: target,
+        row: row,
+        allSchemas: allSchemas,
+        rowsByTableId: rowsByTableId,
+        remainingDepth: remainingDepth - 1,
+      );
+      final dynamic actual = _normalizeCountIfOperand(resolved[colId]);
+      if (_compare(actual, '==', expected)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  dynamic _normalizeCountIfOperand(dynamic value) {
+    if (value == null) {
+      return '';
+    }
+    if (value is bool || value is num) {
+      return value;
+    }
+    final String trimmed = value.toString().trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+    final String lower = trimmed.toLowerCase();
+    if (lower == 'true') {
+      return true;
+    }
+    if (lower == 'false') {
+      return false;
+    }
+    final num? parsed = num.tryParse(trimmed);
+    if (parsed != null) {
+      return parsed;
+    }
+    return trimmed;
+  }
+
   TableSchemaEntity? _schemaByTableName(String raw) {
     final String t = raw.trim();
     for (final TableSchemaEntity s in allSchemas) {
@@ -749,6 +941,9 @@ class _EvalParser {
     if (colId == null) {
       return '';
     }
+    if (target.id == currentSchema.id && workingRowByColId.containsKey(colId)) {
+      return workingRowByColId[colId] ?? '';
+    }
     final List<TableRowEntity> rows =
         rowsByTableId[target.id] ?? <TableRowEntity>[];
     if (rows.isEmpty) {
@@ -765,6 +960,12 @@ class _EvalParser {
   }
 
   dynamic _bareIdent(String name) {
+    if (name == 'true' || name == 'TRUE') {
+      return true;
+    }
+    if (name == 'false' || name == 'FALSE') {
+      return false;
+    }
     final String? cell = _cellByColumnName(name);
     if (cell != null) {
       return cell;

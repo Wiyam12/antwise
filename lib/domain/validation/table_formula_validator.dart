@@ -21,6 +21,7 @@ class TableFormulaValidator {
     'SUM',
     'COUNT',
     'AVG',
+    'COUNTIF',
     'IF',
     'LOOKUP',
   };
@@ -69,6 +70,13 @@ class TableFormulaValidator {
     if (aggregateError != null) {
       return aggregateError;
     }
+      final String? countIfError = _validateCountIfFunctionSignatures(
+        tokens,
+        existingTables: existingTables,
+      );
+      if (countIfError != null) {
+        return countIfError;
+      }
     final String? lookupError = _validateLookupFunctionSignatures(
       tokens,
       existingTables: existingTables,
@@ -131,22 +139,30 @@ class TableFormulaValidator {
         return errSyntax;
       }
       final List<_Token> args = tokens.sublist(i + 2, closeIndex);
-      if (!_isSingleQualifiedReference(args)) {
-        return '$fn expects a table.column reference (e.g. $fn(Transactions.amount)).';
+      if (args.isEmpty) {
+        return '$fn expects at least one argument.';
       }
-      final String tableName = args[0].lexeme.trim();
-      final String columnName = args[2].lexeme.trim();
-      final TableSchemaEntity? table = _schemaByName(existingTables: existingTables, tableName: tableName);
-      if (table == null) {
-        return errBadTable;
-      }
-      final TableColumnEntity? column = _columnByName(table: table, columnName: columnName);
-      if (column == null) {
-        return errBadColumn;
-      }
-      if ((fn == 'SUM' || fn == 'AVG') &&
-          !_isNumericAggregateType(column.type)) {
-        return '$fn expects a numeric column. "$columnName" in $tableName is ${column.type.storageValue}.';
+      if (_isSingleQualifiedReference(args)) {
+        final String tableName = args[0].lexeme.trim();
+        final String columnName = args[2].lexeme.trim();
+        final TableSchemaEntity? table = _schemaByName(
+          existingTables: existingTables,
+          tableName: tableName,
+        );
+        if (table == null) {
+          return errBadTable;
+        }
+        final TableColumnEntity? column = _columnByName(
+          table: table,
+          columnName: columnName,
+        );
+        if (column == null) {
+          return errBadColumn;
+        }
+        if ((fn == 'SUM' || fn == 'AVG') &&
+            !_isNumericAggregateType(column.type)) {
+          return '$fn expects a numeric column. "$columnName" in $tableName is ${column.type.storageValue}.';
+        }
       }
       i = closeIndex + 1;
     }
@@ -286,6 +302,49 @@ class TableFormulaValidator {
     return null;
   }
 
+  static String? _validateCountIfFunctionSignatures(
+    List<_Token> tokens, {
+    required List<TableSchemaEntity> existingTables,
+  }) {
+    int i = 0;
+    while (i < tokens.length - 1) {
+      final _Token t = tokens[i];
+      if (t.type != _Tk.ident ||
+          t.lexeme != 'COUNTIF' ||
+          tokens[i + 1].type != _Tk.lpar) {
+        i++;
+        continue;
+      }
+      final int closeIndex = _findMatchingRightParen(tokens, i + 1);
+      if (closeIndex < 0) {
+        return errSyntax;
+      }
+      final List<List<_Token>> parts = _splitTopLevelArgs(
+        tokens.sublist(i + 2, closeIndex),
+      );
+      if (parts.length != 2) {
+        return 'COUNTIF expects 2 arguments: COUNTIF(table.column, value).';
+      }
+      if (!_isSingleQualifiedReference(parts[0])) {
+        return 'COUNTIF expects first argument as table.column.';
+      }
+      final String tableName = parts[0][0].lexeme.trim();
+      final String columnName = parts[0][2].lexeme.trim();
+      final TableSchemaEntity? table = _schemaByName(
+        existingTables: existingTables,
+        tableName: tableName,
+      );
+      if (table == null) {
+        return errBadTable;
+      }
+      if (_columnByName(table: table, columnName: columnName) == null) {
+        return errBadColumn;
+      }
+      i = closeIndex + 1;
+    }
+    return null;
+  }
+
   static void _validateReferences(
     List<_Token> tokens, {
     required String currentColumnId,
@@ -305,7 +364,7 @@ class TableFormulaValidator {
     while (i < tokens.length) {
       final _Token t = tokens[i];
       if (t.type == _Tk.ident &&
-          t.lexeme == 'LOOKUP' &&
+          (t.lexeme == 'LOOKUP' || t.lexeme == 'COUNTIF') &&
           i + 1 < tokens.length &&
           tokens[i + 1].type == _Tk.lpar) {
         i = _skipBalancedParens(tokens, i + 1);
@@ -338,6 +397,14 @@ class TableFormulaValidator {
           // Plain quoted literals (e.g. "Yes") are scalar values, not refs.
           i += 1;
           continue;
+        }
+        if (t.type == _Tk.ident) {
+          final String lower = t.lexeme.toLowerCase();
+          if (lower == 'true' || lower == 'false') {
+            // Boolean literals are scalar values, not refs.
+            i += 1;
+            continue;
+          }
         }
         _validateSingle(
           part1,

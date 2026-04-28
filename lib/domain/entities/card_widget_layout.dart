@@ -2,7 +2,10 @@
 enum CardWidgetLayout {
   simple,
   info,
-  kpi;
+  kpi,
+  customizable,
+  hero,
+  percent;
 
   String get storageValue => name;
 
@@ -10,6 +13,9 @@ enum CardWidgetLayout {
     return switch (raw) {
       'info' => CardWidgetLayout.info,
       'kpi' => CardWidgetLayout.kpi,
+      'customizable' => CardWidgetLayout.customizable,
+      'hero' => CardWidgetLayout.hero,
+      'percent' => CardWidgetLayout.percent,
       _ => CardWidgetLayout.simple,
     };
   }
