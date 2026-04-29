@@ -29,6 +29,7 @@ class FormulaTextEditorField extends StatefulWidget {
     this.currentColumnNames = const <String>[],
     required this.onChanged,
     this.errorText,
+    this.hintText,
   });
 
   final TextEditingController controller;
@@ -36,6 +37,7 @@ class FormulaTextEditorField extends StatefulWidget {
   final List<String> currentColumnNames;
   final VoidCallback onChanged;
   final String? errorText;
+  final String? hintText;
 
   @override
   State<FormulaTextEditorField> createState() => _FormulaTextEditorFieldState();
@@ -448,7 +450,9 @@ class _FormulaTextEditorFieldState extends State<FormulaTextEditorField> {
           decoration: InputDecoration(
             labelText: 'Formula',
             alignLabelWithHint: true,
-            hintText: 'e.g. IF(SUM(SalesTable.amount) > 100, "Yes", "No")',
+            hintText:
+                widget.hintText ??
+                'e.g. IF(SUM(SalesTable.amount) > 100, "Yes", "No")',
             errorText: widget.errorText,
             errorMaxLines: 4,
             border: const OutlineInputBorder(),

@@ -23,6 +23,7 @@ class TableColumnEntity {
     this.textSuffixIconKey,
     this.textValidationKind = TableTextValidationKind.none,
     this.textCustomRegex,
+    this.dateDefaultToday = false,
     this.numberFieldHint,
     this.numberPrefixText,
     this.numberSuffixText,
@@ -69,6 +70,9 @@ class TableColumnEntity {
   final String? textSuffixIconKey;
   final TableTextValidationKind textValidationKind;
   final String? textCustomRegex;
+
+  // --- Date column defaults (when [type] is [TableColumnType.date]) ---
+  final bool dateDefaultToday;
 
   // --- Number column UI + validation (when [type] is [TableColumnType.number]) ---
   final String? numberFieldHint;

@@ -15,6 +15,7 @@ class TableSchemaHiveModel {
     this.summaryConfig,
     this.inventoryDeduction,
     this.affectingTables,
+    this.validationRules,
     this.searchEnabled = false,
     this.dataLoadingMode = 'lazy',
     this.pageSize = 10,
@@ -35,6 +36,7 @@ class TableSchemaHiveModel {
   final Map<String, dynamic>? summaryConfig;
   final Map<String, dynamic>? inventoryDeduction;
   final List<Map<String, dynamic>>? affectingTables;
+  final List<Map<String, dynamic>>? validationRules;
   final bool searchEnabled;
   final String dataLoadingMode;
   final int pageSize;
@@ -114,6 +116,17 @@ class TableSchemaHiveModelAdapter extends TypeAdapter<TableSchemaHiveModel> {
       affectingTables = parsed;
     }
 
+    List<Map<String, dynamic>>? validationRules;
+    if (data.containsKey(18) && data[18] is List) {
+      final List<Map<String, dynamic>> parsed = <Map<String, dynamic>>[];
+      for (final dynamic item in data[18] as List) {
+        if (item is Map) {
+          parsed.add(item.cast<String, dynamic>());
+        }
+      }
+      validationRules = parsed;
+    }
+
     final bool searchEnabled = data[13] == true;
     final String dataLoadingMode =
         (data[14] is String ? data[14] as String : 'lazy');
@@ -134,6 +147,7 @@ class TableSchemaHiveModelAdapter extends TypeAdapter<TableSchemaHiveModel> {
       summaryConfig: summaryConfig,
       inventoryDeduction: inventoryDeduction,
       affectingTables: affectingTables,
+      validationRules: validationRules,
       searchEnabled: searchEnabled,
       dataLoadingMode: dataLoadingMode,
       pageSize: pageSize,
@@ -145,7 +159,7 @@ class TableSchemaHiveModelAdapter extends TypeAdapter<TableSchemaHiveModel> {
   @override
   void write(BinaryWriter writer, TableSchemaHiveModel obj) {
     writer
-      ..writeByte(18)
+      ..writeByte(19)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -181,6 +195,8 @@ class TableSchemaHiveModelAdapter extends TypeAdapter<TableSchemaHiveModel> {
       ..writeByte(16)
       ..write(obj.lazyInitialLoad)
       ..writeByte(17)
-      ..write(obj.affectingTables ?? <Map<String, dynamic>>[]);
+      ..write(obj.affectingTables ?? <Map<String, dynamic>>[])
+      ..writeByte(18)
+      ..write(obj.validationRules ?? <Map<String, dynamic>>[]);
   }
 }

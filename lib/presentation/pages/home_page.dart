@@ -8,6 +8,7 @@ import 'package:antwise/presentation/controllers/home_controller.dart';
 import 'package:antwise/presentation/widgets/bottom_nav/builder_bottom_nav_bar.dart';
 import 'package:antwise/presentation/widgets/dynamic_builder_page_body.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 
 const double _kDrawerItemFontSize = 12;
@@ -29,6 +30,16 @@ class HomePage extends GetView<HomeController> {
         return Scaffold(
           appBar: _buildAppBar(context, showCreateAction: true),
           body: const Center(child: AppLoading()),
+        );
+      }
+      if (controller.shouldShowSetupMode) {
+        return Scaffold(
+          appBar: _buildAppBar(context, showCreateAction: false),
+          body: _SetupModeBody(
+            isApplyingTemplate: controller.isApplyingSetupTemplate.value,
+            onSelectSimplePos: controller.applySimplePosTemplate,
+            onSelectAdvance: controller.chooseAdvanceMode,
+          ),
         );
       }
       if (!controller.hasPages) {
@@ -103,6 +114,222 @@ class _EmptyBuilderBody extends StatelessWidget {
               label: const Text('Create Page'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SetupModeBody extends StatelessWidget {
+  const _SetupModeBody({
+    required this.isApplyingTemplate,
+    required this.onSelectSimplePos,
+    required this.onSelectAdvance,
+  });
+
+  final bool isApplyingTemplate;
+  final Future<void> Function() onSelectSimplePos;
+  final Future<void> Function() onSelectAdvance;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SetupModeSelector(
+      isApplyingTemplate: isApplyingTemplate,
+      onSelectSimplePos: onSelectSimplePos,
+      onSelectAdvance: onSelectAdvance,
+    );
+  }
+}
+
+enum _SetupModeChoice { simplePos, advance }
+
+class _SetupModeSelector extends StatefulWidget {
+  const _SetupModeSelector({
+    required this.isApplyingTemplate,
+    required this.onSelectSimplePos,
+    required this.onSelectAdvance,
+  });
+
+  final bool isApplyingTemplate;
+  final Future<void> Function() onSelectSimplePos;
+  final Future<void> Function() onSelectAdvance;
+
+  @override
+  State<_SetupModeSelector> createState() => _SetupModeSelectorState();
+}
+
+class _SetupModeSelectorState extends State<_SetupModeSelector> {
+  _SetupModeChoice? _selected;
+
+  Future<void> _proceed() async {
+    if (_selected == null || widget.isApplyingTemplate) {
+      return;
+    }
+    if (_selected == _SetupModeChoice.simplePos) {
+      await widget.onSelectSimplePos();
+      return;
+    }
+    await widget.onSelectAdvance();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(
+            'Choose a Setup Mode',
+            style: theme.textTheme.headlineSmall,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 1,
+                  children: <Widget>[
+                    _setupModeCard(
+                      context: context,
+                      title: 'Simple POS Template',
+                      subtitle:
+                          'Create a simple POS system from starter snapshot',
+                      svgAssetPath: 'assets/svg/pos.svg',
+                      highlighted: true,
+                      selected: _selected == _SetupModeChoice.simplePos,
+                      enabled: !widget.isApplyingTemplate,
+                      onTap:
+                          () => setState(
+                            () => _selected = _SetupModeChoice.simplePos,
+                          ),
+                    ),
+                    _setupModeCard(
+                      context: context,
+                      title: 'Advance Mode',
+                      subtitle: 'Start blank and build everything manually',
+                      svgAssetPath: 'assets/svg/building-blocks.svg',
+                      highlighted: false,
+                      selected: _selected == _SetupModeChoice.advance,
+                      enabled: !widget.isApplyingTemplate,
+                      onTap:
+                          () => setState(
+                            () => _selected = _SetupModeChoice.advance,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: FilledButton(
+              onPressed:
+                  (_selected == null || widget.isApplyingTemplate)
+                      ? null
+                      : _proceed,
+              child: const Text('Proceed'),
+            ),
+          ),
+          const SizedBox(height: 25),
+          if (widget.isApplyingTemplate)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _setupModeCard({
+    required BuildContext context,
+    required String title,
+    required String subtitle,
+    required String svgAssetPath,
+    required bool highlighted,
+    required bool selected,
+    required bool enabled,
+    required VoidCallback onTap,
+  }) {
+    final ThemeData theme = Theme.of(context);
+    final Color bg =
+        selected
+            ? (highlighted
+                ? theme.colorScheme.primaryContainer
+                : theme.colorScheme.secondaryContainer)
+            : (highlighted
+                ? theme.colorScheme.primaryContainer.withValues(alpha: 0.75)
+                : theme.colorScheme.surfaceContainerLow);
+    final Color fg = theme.colorScheme.onSurface;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        gradient:
+            selected
+                ? const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: <Color>[Color(0xFF47D1E8), Color(0xFF5B6DFF)],
+                )
+                : null,
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(selected ? 3 : 0),
+        child: Material(
+          color: bg,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(
+              color:
+                  selected
+                      ? Colors.transparent
+                      : theme.colorScheme.outlineVariant.withValues(
+                        alpha: 0.25,
+                      ),
+            ),
+          ),
+          child: InkWell(
+            onTap: enabled ? onTap : null,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  SvgPicture.asset(svgAssetPath, width: 74, height: 74),
+                  const SizedBox(height: 18),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: fg,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: fg,
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

@@ -63,6 +63,7 @@ class ColumnDraft implements GuidedFormulaColumnLike {
 
   final Rx<TableTextValidationKind> textValidationKind =
       TableTextValidationKind.none.obs;
+  final RxBool dateDefaultToday = false.obs;
   final RxnString textPrefixIconKey = RxnString();
   final RxnString textSuffixIconKey = RxnString();
   final RxBool numberAllowDecimals = true.obs;

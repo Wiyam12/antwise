@@ -14,6 +14,7 @@ import 'package:antwise/domain/entities/table_mode.dart';
 import 'package:antwise/domain/entities/table_schema_entity.dart';
 import 'package:antwise/domain/entities/table_inventory_deduction_config.dart';
 import 'package:antwise/domain/entities/table_summary_config.dart';
+import 'package:antwise/domain/entities/table_validation_rule.dart';
 import 'package:antwise/domain/repositories/table_schema_repository.dart';
 
 Map<String, dynamic>? _readStringDynamicMap(dynamic raw) {
@@ -104,6 +105,7 @@ class TableSchemaRepositoryImpl implements TableSchemaRepository {
               raw['textValidationKind']?.toString(),
             ),
             textCustomRegex: raw['textCustomRegex']?.toString(),
+            dateDefaultToday: raw['dateDefaultToday'] as bool? ?? false,
             numberFieldHint: raw['numberFieldHint']?.toString(),
             numberPrefixText: raw['numberPrefixText']?.toString(),
             numberSuffixText: raw['numberSuffixText']?.toString(),
@@ -143,6 +145,13 @@ class TableSchemaRepositoryImpl implements TableSchemaRepository {
             )
             .whereType<TableAffectingConfig>()
             .toList(growable: false);
+    final List<TableValidationRule> validationRules =
+        (model.validationRules ?? const <Map<String, dynamic>>[])
+            .map(
+              (Map<String, dynamic> raw) => TableValidationRule.tryFromJson(raw),
+            )
+            .whereType<TableValidationRule>()
+            .toList(growable: false);
     return TableSchemaEntity(
       id: model.id,
       pageId: model.pageId,
@@ -161,6 +170,7 @@ class TableSchemaRepositoryImpl implements TableSchemaRepository {
       summaryConfig: summary,
       inventoryDeduction: inventory,
       affectingTables: affectingTables,
+      validationRules: validationRules,
       searchEnabled: model.searchEnabled,
       dataLoadingMode: TableDataLoadingMode.fromStorage(model.dataLoadingMode),
       pageSize: model.pageSize,
@@ -192,6 +202,7 @@ class TableSchemaRepositoryImpl implements TableSchemaRepository {
             'textSuffixIconKey': c.textSuffixIconKey,
             'textValidationKind': c.textValidationKind.storageValue,
             'textCustomRegex': c.textCustomRegex,
+            'dateDefaultToday': c.dateDefaultToday,
             'numberFieldHint': c.numberFieldHint,
             'numberPrefixText': c.numberPrefixText,
             'numberSuffixText': c.numberSuffixText,
@@ -224,6 +235,9 @@ class TableSchemaRepositoryImpl implements TableSchemaRepository {
       inventoryDeduction: schema.inventoryDeduction?.toJson(),
       affectingTables: schema.affectingTables
           .map((TableAffectingConfig config) => config.toJson())
+          .toList(growable: false),
+      validationRules: schema.validationRules
+          .map((TableValidationRule rule) => rule.toJson())
           .toList(growable: false),
       searchEnabled: schema.searchEnabled,
       dataLoadingMode: schema.dataLoadingMode.storageValue,

@@ -1005,6 +1005,24 @@ class CreateWidgetScreen extends GetView<CreateWidgetController> {
                 : 'Bind the card to live table data. Values are computed when the page loads and after data changes.',
             style: theme.textTheme.bodyMedium,
           ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: controller.titleController,
+            decoration: InputDecoration(
+              labelText: isChart ? 'Chart name' : 'Card title (optional)',
+              hintText: isChart ? 'e.g. Sales by Product' : 'e.g. Total Sales',
+              errorText:
+                  isChart && controller.chartNameError.value.isNotEmpty
+                      ? controller.chartNameError.value
+                      : null,
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (_) {
+              if (isChart) {
+                controller.chartNameError.value = '';
+              }
+            },
+          ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
             value: controller.selectedPageId.value,
@@ -1122,22 +1140,51 @@ class CreateWidgetScreen extends GetView<CreateWidgetController> {
                           .toList(growable: false),
                       onChanged: controller.onYAxisColumnSelected,
                     ),
+                    if (controller.selectedChartType.value ==
+                            ChartWidgetType.line &&
+                        controller.isDateXAxisSelectedForChart) ...<Widget>[
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Date Filter Options',
+                          style: theme.textTheme.labelLarge,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      ...ChartDateGroupingFilter.values.map((
+                        ChartDateGroupingFilter filter,
+                      ) {
+                        return CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          value: controller.selectedDateGroupingFilters
+                              .contains(filter),
+                          title: Text(_dateFilterLabel(filter.name)),
+                          onChanged: (bool? checked) {
+                            controller.toggleDateGroupingFilter(
+                              filter,
+                              checked ?? false,
+                            );
+                            controller.xAxisError.value = '';
+                          },
+                        );
+                      }),
+                      if (controller.xAxisError.value.isNotEmpty &&
+                          controller.selectedDateGroupingFilters.isEmpty)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            controller.xAxisError.value,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.error,
+                            ),
+                          ),
+                        ),
+                    ],
                   ],
                 );
               },
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller.titleController,
-              decoration: InputDecoration(
-                labelText:
-                    isChart
-                        ? 'Chart title (optional)'
-                        : 'Card title (optional)',
-                hintText:
-                    isChart ? 'e.g. Sales by Product' : 'e.g. Total Sales',
-                border: OutlineInputBorder(),
-              ),
             ),
           ],
           if (isPercentCard) ...<Widget>[
@@ -1269,6 +1316,16 @@ class CreateWidgetScreen extends GetView<CreateWidgetController> {
     TableColumnType.image => 'Image',
     TableColumnType.file => 'File',
   };
+
+  static String _dateFilterLabel(String token) {
+    return switch (token) {
+      'daily' => 'Daily',
+      'weekly' => 'Weekly',
+      'monthly' => 'Monthly',
+      'yearly' => 'Yearly',
+      _ => token,
+    };
+  }
 }
 
 class _HeroColorOption {

@@ -38,7 +38,8 @@ class _SearchableDropdownFieldState<T extends Object>
   @override
   void didUpdateWidget(covariant SearchableDropdownField<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.value != widget.value || oldWidget.options != widget.options) {
+    if (oldWidget.value != widget.value ||
+        oldWidget.options != widget.options) {
       _syncText();
     }
   }
@@ -125,39 +126,44 @@ class _SearchableDropdownFieldState<T extends Object>
                   final T item = list[index];
                   final String label = widget.optionLabel(item);
                   final String query = _text.text.trim();
-                  final int matchStart = query.isEmpty
-                      ? -1
-                      : label.toLowerCase().indexOf(query.toLowerCase());
+                  final int matchStart =
+                      query.isEmpty
+                          ? -1
+                          : label.toLowerCase().indexOf(query.toLowerCase());
                   final TextStyle baseStyle =
                       Theme.of(context).textTheme.bodyMedium ??
                       const TextStyle();
                   return ListTile(
                     dense: true,
-                    title: matchStart < 0
-                        ? Text(label, style: baseStyle)
-                        : RichText(
-                            text: TextSpan(
-                              style: baseStyle,
-                              children: <InlineSpan>[
-                                TextSpan(text: label.substring(0, matchStart)),
-                                TextSpan(
-                                  text: label.substring(
-                                    matchStart,
-                                    matchStart + query.length,
+                    title:
+                        matchStart < 0
+                            ? Text(label, style: baseStyle)
+                            : RichText(
+                              text: TextSpan(
+                                style: baseStyle,
+                                children: <InlineSpan>[
+                                  TextSpan(
+                                    text: label.substring(0, matchStart),
                                   ),
-                                  style: baseStyle.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                    color: Theme.of(context).colorScheme.primary,
+                                  TextSpan(
+                                    text: label.substring(
+                                      matchStart,
+                                      matchStart + query.length,
+                                    ),
+                                    style: baseStyle.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      color:
+                                          Theme.of(context).colorScheme.primary,
+                                    ),
                                   ),
-                                ),
-                                TextSpan(
-                                  text: label.substring(
-                                    matchStart + query.length,
+                                  TextSpan(
+                                    text: label.substring(
+                                      matchStart + query.length,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
                     onTap: () => onSelected(item),
                   );
                 },

@@ -1,20 +1,23 @@
 import 'package:antwise/core/app_snackbar.dart';
+import 'package:antwise/domain/entities/card_widget_layout.dart';
 import 'package:antwise/domain/entities/builder_page_entity.dart';
 import 'package:antwise/domain/entities/builder_widget_entity.dart';
-import 'package:antwise/domain/entities/card_widget_layout.dart';
 import 'package:antwise/domain/entities/table_column_entity.dart';
+import 'package:antwise/domain/entities/table_column_type.dart';
 import 'package:antwise/domain/entities/table_schema_entity.dart';
 import 'package:antwise/domain/usecases/get_all_builder_widgets_usecase.dart';
 import 'package:antwise/domain/usecases/get_all_table_schemas_usecase.dart';
 import 'package:antwise/domain/usecases/get_builder_pages_usecase.dart';
 import 'package:antwise/domain/usecases/save_builder_widget_usecase.dart';
 import 'package:antwise/domain/validation/table_formula_validator.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:antwise/presentation/controllers/home_controller.dart';
 import 'package:antwise/presentation/routes/app_routes.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 enum SettingsChartWidgetType { bar, line, pie }
+enum SettingsChartDateGroupingFilter { daily, weekly, monthly, yearly }
 
 class SettingsWidgetEditController extends GetxController {
   SettingsWidgetEditController(
@@ -40,6 +43,11 @@ class SettingsWidgetEditController extends GetxController {
 
   final TextEditingController titleController = TextEditingController();
   final TextEditingController formulaController = TextEditingController();
+  final TextEditingController heroCardNameController = TextEditingController();
+  final TextEditingController heroLabelController = TextEditingController();
+  final TextEditingController heroPrefixTextController = TextEditingController();
+  final TextEditingController percentCardNameController = TextEditingController();
+  final TextEditingController percentLabelController = TextEditingController();
 
   final Rxn<CardWidgetLayout> selectedLayout = Rxn<CardWidgetLayout>();
   final Rxn<SettingsChartWidgetType> selectedChartType =
@@ -49,6 +57,8 @@ class SettingsWidgetEditController extends GetxController {
   final RxnString selectedXAxisColumnId = RxnString();
   final RxnString selectedYAxisColumnId = RxnString();
   final RxnString selectedColumnId = RxnString();
+  final RxSet<SettingsChartDateGroupingFilter> selectedDateGroupingFilters =
+      <SettingsChartDateGroupingFilter>{}.obs;
 
   final RxString widgetTypeError = ''.obs;
   final RxString layoutError = ''.obs;
@@ -59,8 +69,23 @@ class SettingsWidgetEditController extends GetxController {
   final RxString yAxisError = ''.obs;
   final RxString columnError = ''.obs;
   final RxString formulaError = ''.obs;
+  final RxString chartNameError = ''.obs;
+  final RxString heroLayoutError = ''.obs;
+  final RxString percentLayoutError = ''.obs;
+  final RxString heroCardNameValue = ''.obs;
+  final RxString heroLabelValue = ''.obs;
+  final RxString heroBackgroundHex = '#4F46E5'.obs;
+  final RxnString heroBackgroundImagePath = RxnString();
+  final RxString heroPrefixType = 'none'.obs;
+  final RxnString heroPrefixIconKey = RxnString();
+  final RxString percentCardNameValue = ''.obs;
+  final RxString percentLabelValue = ''.obs;
+  final RxString percentBackgroundHex = '#2F80ED'.obs;
+  final RxnString percentBackgroundImagePath = RxnString();
+  final RxnString percentIconKey = RxnString();
 
   String? _widgetId;
+  List<BuilderWidgetEntity> _allWidgetsCache = <BuilderWidgetEntity>[];
 
   @override
   void onInit() {
@@ -73,6 +98,11 @@ class SettingsWidgetEditController extends GetxController {
   void onClose() {
     titleController.dispose();
     formulaController.dispose();
+    heroCardNameController.dispose();
+    heroLabelController.dispose();
+    heroPrefixTextController.dispose();
+    percentCardNameController.dispose();
+    percentLabelController.dispose();
     super.onClose();
   }
 
@@ -88,6 +118,7 @@ class SettingsWidgetEditController extends GetxController {
     isLoading.value = true;
     try {
       final List<BuilderWidgetEntity> allWidgets = await _getWidgets();
+      _allWidgetsCache = allWidgets;
       final List<TableSchemaEntity> schemas = await _getSchemas();
       final List<BuilderPageEntity> pageList = await _getPages();
       BuilderWidgetEntity? target;
@@ -119,6 +150,49 @@ class SettingsWidgetEditController extends GetxController {
       selectedColumnId.value = target.config['columnId']?.toString();
       selectedXAxisColumnId.value = target.config['xColumnId']?.toString();
       selectedYAxisColumnId.value = target.config['yColumnId']?.toString();
+      selectedDateGroupingFilters.clear();
+      final List<dynamic> rawDateFilters =
+          (target.config['enabledDateFilters'] as List<dynamic>?) ??
+          const <dynamic>[];
+      for (final dynamic item in rawDateFilters) {
+        final String token = item.toString().trim().toLowerCase();
+        SettingsChartDateGroupingFilter? parsed;
+        for (final SettingsChartDateGroupingFilter option
+            in SettingsChartDateGroupingFilter.values) {
+          if (option.name == token) {
+            parsed = option;
+            break;
+          }
+        }
+        if (parsed != null) {
+          selectedDateGroupingFilters.add(parsed);
+        }
+      }
+      heroCardNameController.text =
+          target.config['heroCardName']?.toString() ?? '';
+      heroLabelController.text = target.config['heroLabel']?.toString() ?? '';
+      heroPrefixTextController.text =
+          target.config['heroPrefixText']?.toString() ?? '';
+      heroCardNameValue.value = heroCardNameController.text;
+      heroLabelValue.value = heroLabelController.text;
+      heroBackgroundHex.value =
+          target.config['heroBackgroundHex']?.toString() ?? '#4F46E5';
+      heroBackgroundImagePath.value =
+          target.config['heroBackgroundImagePath']?.toString();
+      heroPrefixType.value =
+          target.config['heroPrefixType']?.toString() ?? 'none';
+      heroPrefixIconKey.value = target.config['heroPrefixIconKey']?.toString();
+      percentCardNameController.text =
+          target.config['percentCardName']?.toString() ?? '';
+      percentLabelController.text =
+          target.config['percentLabel']?.toString() ?? '';
+      percentCardNameValue.value = percentCardNameController.text;
+      percentLabelValue.value = percentLabelController.text;
+      percentBackgroundHex.value =
+          target.config['percentBackgroundHex']?.toString() ?? '#2F80ED';
+      percentBackgroundImagePath.value =
+          target.config['percentBackgroundImagePath']?.toString();
+      percentIconKey.value = target.config['percentIconKey']?.toString();
     } finally {
       isLoading.value = false;
     }
@@ -157,6 +231,82 @@ class SettingsWidgetEditController extends GetxController {
   void pickLayout(CardWidgetLayout layout) {
     selectedLayout.value = layout;
     layoutError.value = '';
+    heroLayoutError.value = '';
+    percentLayoutError.value = '';
+  }
+
+  Future<void> pickHeroBackgroundImage() async {
+    final FilePickerResult? result = await FilePicker.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+    );
+    final String? path = result?.files.single.path;
+    if (path != null && path.trim().isNotEmpty) {
+      heroBackgroundImagePath.value = path.trim();
+    }
+  }
+
+  void clearHeroBackgroundImage() {
+    heroBackgroundImagePath.value = null;
+  }
+
+  void setHeroBackgroundHex(String value) {
+    heroBackgroundHex.value = value;
+  }
+
+  void setHeroCardName(String value) {
+    heroCardNameValue.value = value;
+  }
+
+  void setHeroLabel(String value) {
+    heroLabelValue.value = value;
+  }
+
+  void setHeroPrefixType(String type) {
+    heroPrefixType.value = type;
+  }
+
+  void setHeroPrefixIconKey(String? iconKey) {
+    heroPrefixIconKey.value = iconKey;
+  }
+
+  Future<void> pickPercentBackgroundImage() async {
+    final FilePickerResult? result = await FilePicker.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+    );
+    final String? path = result?.files.single.path;
+    if (path != null && path.trim().isNotEmpty) {
+      percentBackgroundImagePath.value = path.trim();
+    }
+  }
+
+  void clearPercentBackgroundImage() {
+    percentBackgroundImagePath.value = null;
+  }
+
+  void setPercentBackgroundHex(String value) {
+    percentBackgroundHex.value = value;
+  }
+
+  void setPercentCardName(String value) {
+    percentCardNameValue.value = value;
+  }
+
+  void setPercentLabel(String value) {
+    percentLabelValue.value = value;
+  }
+
+  void setPercentIconKey(String? iconKey) {
+    percentIconKey.value = iconKey;
+  }
+
+  double previewPercentFromFormula(String raw) {
+    final double? parsed = double.tryParse(raw.trim());
+    if (parsed == null) {
+      return 35;
+    }
+    return parsed.clamp(0, 100);
   }
 
   void onPageChanged(String? pageId) {
@@ -169,6 +319,7 @@ class SettingsWidgetEditController extends GetxController {
     selectedColumnId.value = null;
     selectedXAxisColumnId.value = null;
     selectedYAxisColumnId.value = null;
+    selectedDateGroupingFilters.clear();
     tableError.value = '';
     columnError.value = '';
     xAxisError.value = '';
@@ -183,6 +334,9 @@ class SettingsWidgetEditController extends GetxController {
   void onXAxisColumnChanged(String? columnId) {
     selectedXAxisColumnId.value = columnId;
     xAxisError.value = '';
+    if (isDateXAxisSelectedForChart && selectedDateGroupingFilters.isEmpty) {
+      selectedDateGroupingFilters.addAll(SettingsChartDateGroupingFilter.values);
+    }
   }
 
   void onYAxisColumnChanged(String? columnId) {
@@ -193,6 +347,40 @@ class SettingsWidgetEditController extends GetxController {
   void pickChartType(SettingsChartWidgetType type) {
     selectedChartType.value = type;
     chartTypeError.value = '';
+    if (type != SettingsChartWidgetType.line) {
+      selectedDateGroupingFilters.clear();
+    }
+  }
+
+  bool get isDateXAxisSelectedForChart {
+    if (!isChartWidget) {
+      return false;
+    }
+    final String? xId = selectedXAxisColumnId.value;
+    if (xId == null || xId.isEmpty) {
+      return false;
+    }
+    final TableSchemaEntity? t = selectedTable;
+    if (t == null) {
+      return false;
+    }
+    for (final TableColumnEntity c in t.columns) {
+      if (c.id == xId) {
+        return c.type == TableColumnType.date;
+      }
+    }
+    return false;
+  }
+
+  void toggleDateGroupingFilter(
+    SettingsChartDateGroupingFilter filter,
+    bool enabled,
+  ) {
+    if (enabled) {
+      selectedDateGroupingFilters.add(filter);
+    } else {
+      selectedDateGroupingFilters.remove(filter);
+    }
   }
 
   bool _validate() {
@@ -205,6 +393,7 @@ class SettingsWidgetEditController extends GetxController {
     yAxisError.value = '';
     columnError.value = '';
     formulaError.value = '';
+    chartNameError.value = '';
 
     final String? pageId = selectedPageId.value;
     if (pageId == null || pageId.isEmpty) {
@@ -219,6 +408,36 @@ class SettingsWidgetEditController extends GetxController {
     } else if (isChartWidget) {
       if (selectedChartType.value == null) {
         chartTypeError.value = 'Select a chart type';
+        return false;
+      }
+      final String chartName = titleController.text.trim();
+      if (chartName.isEmpty) {
+        chartNameError.value = 'Chart name is required';
+        return false;
+      }
+      final String? pageId = selectedPageId.value;
+      if (pageId != null && pageId.isNotEmpty) {
+        final String normalized = chartName.toLowerCase();
+        final String currentId = widget.value?.id ?? '';
+        for (final BuilderWidgetEntity item in _allWidgetsCache) {
+          if (item.id == currentId ||
+              item.type != 'chart' ||
+              item.pageId != pageId) {
+            continue;
+          }
+          final String existing = (item.config['title']?.toString() ?? '')
+              .trim()
+              .toLowerCase();
+          if (existing.isNotEmpty && existing == normalized) {
+            chartNameError.value = 'Chart name must be unique on this page';
+            return false;
+          }
+        }
+      }
+      if (selectedChartType.value == SettingsChartWidgetType.line &&
+          isDateXAxisSelectedForChart &&
+          selectedDateGroupingFilters.isEmpty) {
+        xAxisError.value = 'Select at least one date filter option';
         return false;
       }
     }
@@ -321,6 +540,47 @@ class SettingsWidgetEditController extends GetxController {
         nextConfig.remove('chartType');
         nextConfig.remove('xColumnId');
         nextConfig.remove('yColumnId');
+        if (layout == CardWidgetLayout.hero) {
+          nextConfig['heroCardName'] = heroCardNameController.text.trim();
+          nextConfig['heroLabel'] = heroLabelController.text.trim();
+          nextConfig['heroBackgroundHex'] = heroBackgroundHex.value.trim();
+          nextConfig['heroPrefixType'] = heroPrefixType.value;
+          final String prefixText = heroPrefixTextController.text.trim();
+          if (prefixText.isEmpty) {
+            nextConfig.remove('heroPrefixText');
+          } else {
+            nextConfig['heroPrefixText'] = prefixText;
+          }
+          final String? prefixIcon = heroPrefixIconKey.value?.trim();
+          if (prefixIcon == null || prefixIcon.isEmpty) {
+            nextConfig.remove('heroPrefixIconKey');
+          } else {
+            nextConfig['heroPrefixIconKey'] = prefixIcon;
+          }
+          final String? imagePath = heroBackgroundImagePath.value?.trim();
+          if (imagePath == null || imagePath.isEmpty) {
+            nextConfig.remove('heroBackgroundImagePath');
+          } else {
+            nextConfig['heroBackgroundImagePath'] = imagePath;
+          }
+        }
+        if (layout == CardWidgetLayout.percent) {
+          nextConfig['percentCardName'] = percentCardNameController.text.trim();
+          nextConfig['percentLabel'] = percentLabelController.text.trim();
+          nextConfig['percentBackgroundHex'] = percentBackgroundHex.value.trim();
+          final String? iconKey = percentIconKey.value?.trim();
+          if (iconKey == null || iconKey.isEmpty) {
+            nextConfig.remove('percentIconKey');
+          } else {
+            nextConfig['percentIconKey'] = iconKey;
+          }
+          final String? imagePath = percentBackgroundImagePath.value?.trim();
+          if (imagePath == null || imagePath.isEmpty) {
+            nextConfig.remove('percentBackgroundImagePath');
+          } else {
+            nextConfig['percentBackgroundImagePath'] = imagePath;
+          }
+        }
       } else if (isChartWidget) {
         nextConfig['chartType'] = selectedChartType.value?.name ?? 'bar';
         final String? resolvedXColumnId =
@@ -335,12 +595,24 @@ class SettingsWidgetEditController extends GetxController {
         } else {
           nextConfig['yColumnId'] = y;
         }
+        if (selectedChartType.value == SettingsChartWidgetType.line &&
+            isDateXAxisSelectedForChart) {
+          nextConfig['enabledDateFilters'] = selectedDateGroupingFilters
+              .map((SettingsChartDateGroupingFilter f) => f.name)
+              .toList(growable: false);
+        } else {
+          nextConfig.remove('enabledDateFilters');
+        }
         nextConfig.remove('cardLayout');
         nextConfig.remove('columnId');
       }
       final String title = titleController.text.trim();
       if (title.isEmpty) {
-        nextConfig.remove('title');
+        if (isChartWidget) {
+          nextConfig['title'] = title;
+        } else {
+          nextConfig.remove('title');
+        }
       } else {
         nextConfig['title'] = title;
       }

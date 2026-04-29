@@ -14,6 +14,7 @@ import 'package:antwise/domain/entities/table_list_design_layout.dart';
 import 'package:antwise/domain/entities/table_mode.dart';
 import 'package:antwise/domain/entities/table_schema_entity.dart';
 import 'package:antwise/domain/entities/table_summary_config.dart';
+import 'package:antwise/domain/entities/table_validation_rule.dart';
 import 'package:antwise/domain/usecases/get_all_table_schemas_usecase.dart';
 import 'package:antwise/domain/usecases/get_builder_pages_usecase.dart';
 import 'package:antwise/domain/usecases/get_table_rows_usecase.dart';
@@ -128,6 +129,8 @@ class CreateTableController extends GetxController
   final RxnString summaryGroupByColumnId = RxnString();
   final RxnString summaryAggregateColumnId = RxnString();
   final RxList<SummaryColumnDraft> summaryColumns = <SummaryColumnDraft>[].obs;
+  final RxList<TableValidationRuleDraft> validationRules =
+      <TableValidationRuleDraft>[].obs;
 
   final RxInt currentStep = 0.obs;
   final Rxn<TableListDesignLayout> selectedDesign =
@@ -203,6 +206,10 @@ class CreateTableController extends GetxController
     _disposeSummaryColumns();
     readOnlyPopulateMapping.dispose();
     clearAffectingTables();
+    for (final TableValidationRuleDraft rule in validationRules) {
+      rule.dispose();
+    }
+    validationRules.clear();
     super.onClose();
   }
 
@@ -257,6 +264,7 @@ class CreateTableController extends GetxController
       dataLoadingMode.value = TableDataLoadingMode.lazy;
       pageSize.value = 10;
       lazyInitialLoad.value = 5;
+      clearValidationRules();
     } else {
       summarySourceTableId.value = null;
       summaryGroupByColumnId.value = null;
@@ -366,6 +374,35 @@ class CreateTableController extends GetxController
     affectingTables.clear();
     affectingFormulaErrors.clear();
     affectingFormulaErrors.refresh();
+  }
+
+  void addValidationRule() {
+    validationRules.add(
+      TableValidationRuleDraft(
+        id: _uuid.v4(),
+        nameController: TextEditingController(
+          text: 'Validation ${validationRules.length + 1}',
+        ),
+      ),
+    );
+  }
+
+  void removeValidationRule(String id) {
+    final int index = validationRules.indexWhere(
+      (TableValidationRuleDraft draft) => draft.id == id,
+    );
+    if (index < 0) {
+      return;
+    }
+    final TableValidationRuleDraft removed = validationRules.removeAt(index);
+    removed.dispose();
+  }
+
+  void clearValidationRules() {
+    for (final TableValidationRuleDraft rule in validationRules) {
+      rule.dispose();
+    }
+    validationRules.clear();
   }
 
   List<TableSchemaEntity> get summarySourceTableOptions {
@@ -934,6 +971,18 @@ class CreateTableController extends GetxController
     _syncReadOnlyRowsWithColumns();
   }
 
+  void reorderColumns(int oldIndex, int newIndex) {
+    if (oldIndex < 0 ||
+        oldIndex >= columns.length ||
+        newIndex < 0 ||
+        newIndex >= columns.length) {
+      return;
+    }
+    final ColumnDraft moved = columns.removeAt(oldIndex);
+    columns.insert(newIndex, moved);
+    _syncReadOnlyRowsWithColumns();
+  }
+
   void removeColumn(String id) {
     final int index = columns.indexWhere((c) => c.id == id);
     if (index < 0) {
@@ -965,8 +1014,8 @@ class CreateTableController extends GetxController
     if (tableKind.value == TableKind.summary) {
       return 4;
     }
-    // Standard tables end at Review on step 5.
-    return 5;
+    // Standard tables include Validation Rules before Review.
+    return isCrudStandardTable ? 6 : 5;
   }
 
   void addReadOnlyRow() {
@@ -1282,6 +1331,33 @@ class CreateTableController extends GetxController
     return null;
   }
 
+  String? _validateCustomValidationRules() {
+    final List<ColumnNameDraft> sourceColumns = allColumnsAsNameDrafts();
+    for (final TableValidationRuleDraft rule in validationRules) {
+      final String condition = rule.conditionController.text.trim();
+      final String errorMessage = rule.errorMessageController.text.trim();
+      if (condition.isEmpty) {
+        return 'Validation rule condition is required.';
+      }
+      if (errorMessage.isEmpty) {
+        return 'Validation rule error message is required.';
+      }
+      final String? formulaError = TableFormulaValidator.validate(
+        formula: condition,
+        currentColumnId: '',
+        siblingColumns: sourceColumns,
+        existingTables:
+            existingTableSchemas.isNotEmpty
+                ? existingTableSchemas.toList(growable: false)
+                : _existingSchemasCache,
+      );
+      if (formulaError != null) {
+        return formulaError;
+      }
+    }
+    return null;
+  }
+
   String? validateForStep(int step) {
     switch (step) {
       case 0:
@@ -1334,14 +1410,16 @@ class CreateTableController extends GetxController
         }
         return _validateColumns();
       case 4:
-        if (isCrudStandardTable) {
-          return _validateAffectingTables();
-        }
         if (tableKind.value == TableKind.summary) {
           return (tableNameController.text.trim().isEmpty
                   ? 'Table name is required'
                   : null) ??
               (selectedPageId.value == null ? 'Assign page is required' : null);
+        }
+        return _validateCustomValidationRules();
+      case 5:
+        if (isCrudStandardTable) {
+          return _validateAffectingTables();
         }
         return _validateColumns() ??
             (tableNameController.text.trim().isEmpty
@@ -1349,7 +1427,7 @@ class CreateTableController extends GetxController
                 : null) ??
             (selectedPageId.value == null ? 'Assign page is required' : null) ??
             (selectedDesign.value == null ? 'Select a layout' : null);
-      case 5:
+      case 6:
         if (tableKind.value == TableKind.summary || isCrudStandardTable) {
           return (tableNameController.text.trim().isEmpty
                   ? 'Table name is required'
@@ -1357,7 +1435,7 @@ class CreateTableController extends GetxController
               (selectedPageId.value == null ? 'Assign page is required' : null);
         }
         return null;
-      case 6:
+      case 7:
         if (tableKind.value == TableKind.summary) {
           return (tableNameController.text.trim().isEmpty
                   ? 'Table name is required'
@@ -1574,6 +1652,8 @@ class CreateTableController extends GetxController
                         ? null
                         : c.textCustomRegexController.text.trim())
                     : null,
+            dateDefaultToday:
+                resolved == TableColumnType.date ? c.dateDefaultToday.value : false,
             numberFieldHint:
                 resolved == TableColumnType.number
                     ? (c.numberHintController.text.trim().isEmpty
@@ -1691,6 +1771,7 @@ class CreateTableController extends GetxController
       final bool swipe;
       final TableListDesignLayout savedDesign;
       final List<TableAffectingConfig> affectingCfg;
+      final List<TableValidationRule> validationRulesCfg;
       if (savedKind == TableKind.summary) {
         if (summaryColumns.isEmpty) {
           showAppSnackbar('Validation', 'Invalid summary configuration');
@@ -1744,6 +1825,7 @@ class CreateTableController extends GetxController
         swipe = false;
         savedDesign = TableListDesignLayout.standard;
         affectingCfg = const <TableAffectingConfig>[];
+        validationRulesCfg = const <TableValidationRule>[];
       } else {
         summaryCfg = null;
         schemaColumns = _buildSchemaColumns();
@@ -1751,6 +1833,9 @@ class CreateTableController extends GetxController
         swipe = swipeToDelete.value;
         savedDesign = design;
         affectingCfg = _buildAffectingTablesConfig();
+        validationRulesCfg = validationRules
+            .map((TableValidationRuleDraft draft) => draft.toEntity())
+            .toList(growable: false);
       }
       await _saveTableSchema(
         TableSchemaEntity(
@@ -1766,6 +1851,7 @@ class CreateTableController extends GetxController
           tableKind: savedKind,
           summaryConfig: summaryCfg,
           affectingTables: affectingCfg,
+          validationRules: validationRulesCfg,
           searchEnabled:
               savedKind == TableKind.summary ? false : searchEnabled.value,
           dataLoadingMode:
@@ -2223,5 +2309,34 @@ class AffectingTableDraft {
     for (final AffectingColumnRuleDraft rule in rules) {
       rule.dispose();
     }
+  }
+}
+
+class TableValidationRuleDraft {
+  TableValidationRuleDraft({required this.id, TextEditingController? nameController})
+    : nameController = nameController ?? TextEditingController();
+
+  final String id;
+  final TextEditingController nameController;
+  final TextEditingController conditionController = TextEditingController();
+  final TextEditingController errorMessageController = TextEditingController();
+  final RxBool enabled = true.obs;
+
+  TableValidationRule toEntity() {
+    return TableValidationRule(
+      id: id,
+      name: nameController.text.trim().isEmpty
+          ? 'Validation rule'
+          : nameController.text.trim(),
+      conditionFormula: conditionController.text.trim(),
+      errorMessage: errorMessageController.text.trim(),
+      enabled: enabled.value,
+    );
+  }
+
+  void dispose() {
+    nameController.dispose();
+    conditionController.dispose();
+    errorMessageController.dispose();
   }
 }

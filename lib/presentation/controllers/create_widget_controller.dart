@@ -22,6 +22,7 @@ import 'package:uuid/uuid.dart';
 
 enum BuilderWidgetType { card, chart }
 enum ChartWidgetType { bar, line, pie }
+enum ChartDateGroupingFilter { daily, weekly, monthly, yearly }
 
 class CreateWidgetController extends GetxController {
   CreateWidgetController(
@@ -63,6 +64,8 @@ class CreateWidgetController extends GetxController {
   final RxnString selectedXAxisColumnId = RxnString();
   final RxnString selectedYAxisColumnId = RxnString();
   final RxnString selectedColumnId = RxnString();
+  final RxSet<ChartDateGroupingFilter> selectedDateGroupingFilters =
+      <ChartDateGroupingFilter>{}.obs;
   final RxBool useSavedCustomTemplate = false.obs;
   final RxList<CustomCardTemplateOption> customTemplateOptions =
       <CustomCardTemplateOption>[].obs;
@@ -107,12 +110,14 @@ class CreateWidgetController extends GetxController {
   final RxString yAxisError = ''.obs;
   final RxString columnError = ''.obs;
   final RxString formulaError = ''.obs;
+  final RxString chartNameError = ''.obs;
   final RxString customTemplateError = ''.obs;
   final RxString heroLayoutError = ''.obs;
   final RxString percentLayoutError = ''.obs;
 
   final Uuid _uuid = const Uuid();
   List<TableSchemaEntity> _schemaCache = <TableSchemaEntity>[];
+  List<BuilderWidgetEntity> _allWidgetsCache = <BuilderWidgetEntity>[];
   final Map<String, List<TableRowEntity>> _rowsByTableIdPreview =
       <String, List<TableRowEntity>>{};
 
@@ -379,6 +384,7 @@ class CreateWidgetController extends GetxController {
   Future<void> _loadCustomTemplates() async {
     try {
       final List<BuilderWidgetEntity> allWidgets = await _getAllWidgets();
+      _allWidgetsCache = allWidgets;
       final Map<String, CustomCardTemplateOption> byId =
           <String, CustomCardTemplateOption>{};
       for (final BuilderWidgetEntity widget in allWidgets) {
@@ -409,6 +415,7 @@ class CreateWidgetController extends GetxController {
       }
       customTemplateOptions.assignAll(byId.values);
     } catch (_) {
+      _allWidgetsCache = <BuilderWidgetEntity>[];
       customTemplateOptions.clear();
     }
   }
@@ -443,6 +450,7 @@ class CreateWidgetController extends GetxController {
     tableError.value = '';
     xAxisError.value = '';
     yAxisError.value = '';
+    selectedDateGroupingFilters.clear();
     columnError.value = '';
   }
 
@@ -454,6 +462,9 @@ class CreateWidgetController extends GetxController {
   void onXAxisColumnSelected(String? id) {
     selectedXAxisColumnId.value = id;
     xAxisError.value = '';
+    if (isDateXAxisSelectedForChart && selectedDateGroupingFilters.isEmpty) {
+      selectedDateGroupingFilters.addAll(ChartDateGroupingFilter.values);
+    }
   }
 
   void onYAxisColumnSelected(String? id) {
@@ -638,6 +649,37 @@ class CreateWidgetController extends GetxController {
   void pickChartType(ChartWidgetType chartType) {
     selectedChartType.value = chartType;
     chartTypeError.value = '';
+    if (chartType != ChartWidgetType.line) {
+      selectedDateGroupingFilters.clear();
+    }
+  }
+
+  bool get isDateXAxisSelectedForChart {
+    if (selectedWidgetType.value != BuilderWidgetType.chart) {
+      return false;
+    }
+    final String? xId = selectedXAxisColumnId.value;
+    if (xId == null || xId.isEmpty) {
+      return false;
+    }
+    final TableSchemaEntity? t = schemaById(selectedTableId.value);
+    if (t == null) {
+      return false;
+    }
+    for (final TableColumnEntity c in t.columns) {
+      if (c.id == xId) {
+        return c.type == TableColumnType.date;
+      }
+    }
+    return false;
+  }
+
+  void toggleDateGroupingFilter(ChartDateGroupingFilter filter, bool enabled) {
+    if (enabled) {
+      selectedDateGroupingFilters.add(filter);
+    } else {
+      selectedDateGroupingFilters.remove(filter);
+    }
   }
 
   void clearStepErrors() {
@@ -650,9 +692,40 @@ class CreateWidgetController extends GetxController {
     yAxisError.value = '';
     columnError.value = '';
     formulaError.value = '';
+    chartNameError.value = '';
     customTemplateError.value = '';
     heroLayoutError.value = '';
     percentLayoutError.value = '';
+  }
+
+  bool _validateChartName() {
+    chartNameError.value = '';
+    if (selectedWidgetType.value != BuilderWidgetType.chart) {
+      return true;
+    }
+    final String chartName = titleController.text.trim();
+    if (chartName.isEmpty) {
+      chartNameError.value = 'Chart name is required';
+      return false;
+    }
+    final String? pageId = selectedPageId.value;
+    if (pageId == null || pageId.isEmpty) {
+      return true;
+    }
+    final String normalized = chartName.toLowerCase();
+    for (final BuilderWidgetEntity widget in _allWidgetsCache) {
+      if (widget.type != 'chart' || widget.pageId != pageId) {
+        continue;
+      }
+      final String existing = (widget.config['title']?.toString() ?? '')
+          .trim()
+          .toLowerCase();
+      if (existing.isNotEmpty && existing == normalized) {
+        chartNameError.value = 'Chart name must be unique on this page';
+        return false;
+      }
+    }
+    return true;
   }
 
   bool _validateFormulaOptional() {
@@ -782,6 +855,9 @@ class CreateWidgetController extends GetxController {
             }
           }
         } else {
+          if (!_validateChartName()) {
+            return chartNameError.value;
+          }
           if (selectedXAxisColumnId.value == null ||
               selectedXAxisColumnId.value!.isEmpty) {
             xAxisError.value = 'Select an X-axis column';
@@ -792,6 +868,12 @@ class CreateWidgetController extends GetxController {
               formulaController.text.trim().isEmpty) {
             yAxisError.value = 'Select a Y-axis column or add a formula';
             return yAxisError.value;
+          }
+          if (selectedChartType.value == ChartWidgetType.line &&
+              isDateXAxisSelectedForChart &&
+              selectedDateGroupingFilters.isEmpty) {
+            xAxisError.value = 'Select at least one date filter option';
+            return xAxisError.value;
           }
         }
         if (!_validateFormulaOptional()) {
@@ -961,6 +1043,10 @@ class CreateWidgetController extends GetxController {
       if (!_validateFormulaOptional()) {
         return;
       }
+      if (widgetType == BuilderWidgetType.chart && !_validateChartName()) {
+        showAppSnackbar('Validation', chartNameError.value);
+        return;
+      }
       final String formulaTrim = formulaController.text.trim();
       final String percentFormulaTrim = buildPercentCombinedFormula();
       final String effectiveFormula =
@@ -1058,10 +1144,19 @@ class CreateWidgetController extends GetxController {
           }
         }
       } else {
+        config['title'] = titleController.text.trim();
         config['chartType'] = chartType.name;
         config['xColumnId'] = xColumn!.id;
         if (yColumn != null) {
           config['yColumnId'] = yColumn.id;
+        }
+        if (chartType == ChartWidgetType.line &&
+            xColumn.type == TableColumnType.date) {
+          config['enabledDateFilters'] = selectedDateGroupingFilters
+              .map((ChartDateGroupingFilter f) => f.name)
+              .toList(growable: false);
+        } else {
+          config.remove('enabledDateFilters');
         }
       }
       if (effectiveFormula.isNotEmpty) {

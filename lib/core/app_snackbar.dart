@@ -10,10 +10,26 @@ void showAppSnackbar(
   final ThemeData theme = Get.theme;
   final ColorScheme scheme = theme.colorScheme;
   final SnackBarThemeData snackTheme = theme.snackBarTheme;
-  final Color backgroundColor =
-      snackTheme.backgroundColor ?? scheme.inverseSurface;
-  final Color foregroundColor =
-      snackTheme.contentTextStyle?.color ?? scheme.onInverseSurface;
+  final String normalizedTitle = title.trim().toLowerCase();
+  final bool isValidation = normalizedTitle.contains('validation');
+  final bool isError =
+      normalizedTitle.contains('error') ||
+      normalizedTitle.contains('failed') ||
+      normalizedTitle.contains('fail');
+
+  final Color backgroundColor;
+  final Color foregroundColor;
+  if (isValidation) {
+    backgroundColor = Colors.yellow.shade700;
+    foregroundColor = Colors.black87;
+  } else if (isError) {
+    backgroundColor = Colors.red.shade700;
+    foregroundColor = Colors.white;
+  } else {
+    backgroundColor = snackTheme.backgroundColor ?? scheme.inverseSurface;
+    foregroundColor =
+        snackTheme.contentTextStyle?.color ?? scheme.onInverseSurface;
+  }
   Get.snackbar(
     title,
     message,

@@ -15,6 +15,8 @@ import 'package:antwise/domain/entities/table_list_design_layout.dart';
 import 'package:antwise/domain/entities/table_mode.dart';
 import 'package:antwise/domain/entities/table_row_entity.dart';
 import 'package:antwise/domain/entities/table_schema_entity.dart';
+import 'package:antwise/domain/entities/table_summary_config.dart';
+import 'package:antwise/domain/entities/table_validation_rule.dart';
 import 'package:antwise/domain/usecases/get_all_table_schemas_usecase.dart';
 import 'package:antwise/domain/usecases/get_builder_pages_usecase.dart';
 import 'package:antwise/domain/usecases/get_table_rows_usecase.dart';
@@ -64,6 +66,9 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
   final RxList<AffectingTableDraft> affectingTables =
       <AffectingTableDraft>[].obs;
   final RxMap<String, String> affectingFormulaErrors = <String, String>{}.obs;
+  final RxList<SummaryColumnDraft> summaryColumns = <SummaryColumnDraft>[].obs;
+  final RxList<TableValidationRuleDraft> validationRules =
+      <TableValidationRuleDraft>[].obs;
   final RxBool isLoading = true.obs;
   final RxBool isSaving = false.obs;
   final RxBool isRowsLoading = false.obs;
@@ -102,10 +107,7 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
     if (_schema?.tableKind == TableKind.summary) {
       return 4;
     }
-    if (isCrudStandardTable) {
-      return 5;
-    }
-    return 4;
+    return isCrudStandardTable ? 6 : 5;
   }
 
   TableListDesignLayout? get persistedListDesign => _schema?.listDesignLayout;
@@ -276,6 +278,8 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       mappingCells: mappingCells,
     );
     clearAffectingTables();
+    clearValidationRules();
+    _disposeSummaryColumns();
     _scheduleDisposeFormControllers(
       tableName: tableNameController,
       description: descriptionController,
@@ -319,6 +323,8 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
     pageSize.value = schema.pageSize;
     lazyInitialLoad.value = schema.lazyInitialLoad;
     _hydrateAffectingFromSchema(schema.affectingTables);
+    _hydrateValidationRulesFromSchema(schema.validationRules);
+    _hydrateSummaryColumnsFromSchema(schema.summaryConfig, schema.columns);
     columns.assignAll(
       schema.columns
           .map((TableColumnEntity c) => EditColumnDraft.fromEntity(c))
@@ -421,6 +427,159 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
     affectingTables.clear();
     affectingFormulaErrors.clear();
     affectingFormulaErrors.refresh();
+  }
+
+  void addValidationRule() {
+    validationRules.add(
+      TableValidationRuleDraft(
+        id: _uuid.v4(),
+        nameController: TextEditingController(
+          text: 'Validation ${validationRules.length + 1}',
+        ),
+      ),
+    );
+  }
+
+  void removeValidationRule(String id) {
+    final int index = validationRules.indexWhere(
+      (TableValidationRuleDraft draft) => draft.id == id,
+    );
+    if (index < 0) {
+      return;
+    }
+    final TableValidationRuleDraft removed = validationRules.removeAt(index);
+    removed.dispose();
+  }
+
+  void clearValidationRules() {
+    for (final TableValidationRuleDraft rule in validationRules) {
+      rule.dispose();
+    }
+    validationRules.clear();
+  }
+
+  void _hydrateValidationRulesFromSchema(List<TableValidationRule> rules) {
+    clearValidationRules();
+    for (final TableValidationRule rule in rules) {
+      final TableValidationRuleDraft draft = TableValidationRuleDraft(
+        id: rule.id,
+        nameController: TextEditingController(text: rule.name),
+      );
+      draft.conditionController.text = rule.conditionFormula;
+      draft.errorMessageController.text = rule.errorMessage;
+      draft.enabled.value = rule.enabled;
+      validationRules.add(draft);
+    }
+  }
+
+  void _disposeSummaryColumns() {
+    for (final SummaryColumnDraft draft in summaryColumns) {
+      draft.dispose();
+    }
+    summaryColumns.clear();
+  }
+
+  void _hydrateSummaryColumnsFromSchema(
+    TableSummaryConfig? config,
+    List<TableColumnEntity> fallbackColumns,
+  ) {
+    _disposeSummaryColumns();
+    final List<SummaryColumnConfig> configs =
+        config?.columns ?? const <SummaryColumnConfig>[];
+    if (configs.isNotEmpty) {
+      summaryColumns.assignAll(
+        configs.map((SummaryColumnConfig col) {
+          final SummaryColumnDraft draft = SummaryColumnDraft(
+            id: col.id,
+            nameController: TextEditingController(text: col.name),
+          );
+          draft.sourceTableId.value = col.sourceTableId;
+          draft.sourceColumnId.value = col.sourceColumnId;
+          draft.groupBy.value = col.groupBy;
+          draft.valueMode.value = col.valueMode;
+          draft.aggregation.value = col.aggregation;
+          draft.formulaController.text = col.formula ?? '';
+          return draft;
+        }).toList(growable: false),
+      );
+      return;
+    }
+
+    if (fallbackColumns.isEmpty) {
+      addSummaryColumn();
+      return;
+    }
+    summaryColumns.assignAll(
+      fallbackColumns.map((TableColumnEntity col) {
+        final SummaryColumnDraft draft = SummaryColumnDraft(
+          id: col.id,
+          nameController: TextEditingController(text: col.name),
+        );
+        if (config != null) {
+          draft.sourceTableId.value = config.sourceTableId;
+          draft.sourceColumnId.value = col.id;
+          draft.groupBy.value = col.id == config.groupByColumnId;
+          draft.valueMode.value =
+              col.type == TableColumnType.number
+                  ? SummaryValueMode.aggregation
+                  : SummaryValueMode.uniqueValue;
+          draft.aggregation.value = config.operation;
+        }
+        return draft;
+      }).toList(growable: false),
+    );
+  }
+
+  List<TableSchemaEntity> get summarySourceTableOptions {
+    return existingTableSchemas
+        .where((TableSchemaEntity s) => s.tableKind != TableKind.summary)
+        .toList(growable: false);
+  }
+
+  void addSummaryColumn() {
+    summaryColumns.add(
+      SummaryColumnDraft(
+        id: _uuid.v4(),
+        nameController: TextEditingController(
+          text: 'Column ${summaryColumns.length + 1}',
+        ),
+      ),
+    );
+  }
+
+  void removeSummaryColumn(String id) {
+    if (summaryColumns.length <= 1) {
+      return;
+    }
+    final int index = summaryColumns.indexWhere((SummaryColumnDraft c) => c.id == id);
+    if (index < 0) {
+      return;
+    }
+    final SummaryColumnDraft removed = summaryColumns.removeAt(index);
+    removed.dispose();
+  }
+
+  void moveSummaryColumn(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= summaryColumns.length) {
+      return;
+    }
+    int targetIndex = newIndex;
+    if (targetIndex < 0) {
+      targetIndex = 0;
+    }
+    if (targetIndex >= summaryColumns.length) {
+      targetIndex = summaryColumns.length - 1;
+    }
+    if (oldIndex < targetIndex) {
+      targetIndex -= 1;
+    }
+    final SummaryColumnDraft item = summaryColumns.removeAt(oldIndex);
+    summaryColumns.insert(targetIndex, item);
+  }
+
+  List<TableColumnEntity> summarySourceColumns(String? sourceTableId) {
+    final TableSchemaEntity? src = summarySourceSchema(sourceTableId);
+    return src?.columns ?? const <TableColumnEntity>[];
   }
 
   void addAffectingTableRule() {
@@ -600,8 +759,11 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
   }
 
   void reorderColumns(int oldIndex, int newIndex) {
-    if (newIndex > oldIndex) {
-      newIndex -= 1;
+    if (oldIndex < 0 ||
+        oldIndex >= columns.length ||
+        newIndex < 0 ||
+        newIndex >= columns.length) {
+      return;
     }
     final EditColumnDraft moved = columns.removeAt(oldIndex);
     columns.insert(newIndex, moved);
@@ -1737,6 +1899,33 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
     return null;
   }
 
+  String? _validateCustomValidationRules() {
+    final List<ColumnNameDraft> sourceColumns = allColumnsAsNameDrafts();
+    for (final TableValidationRuleDraft rule in validationRules) {
+      final String condition = rule.conditionController.text.trim();
+      final String errorMessage = rule.errorMessageController.text.trim();
+      if (condition.isEmpty) {
+        return 'Validation rule condition is required.';
+      }
+      if (errorMessage.isEmpty) {
+        return 'Validation rule error message is required.';
+      }
+      final String? formulaError = TableFormulaValidator.validate(
+        formula: condition,
+        currentColumnId: '',
+        siblingColumns: sourceColumns,
+        existingTables:
+            existingTableSchemas.isNotEmpty
+                ? existingTableSchemas.toList(growable: false)
+                : _formulaSchemaCache,
+      );
+      if (formulaError != null) {
+        return formulaError;
+      }
+    }
+    return null;
+  }
+
   String? validateForStep(int step) {
     if (_schema == null) {
       return null;
@@ -1745,6 +1934,34 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
     final bool crudStd = isCrudStandardTable;
     switch (step) {
       case 0:
+        if (isSummary) {
+          if (summarySourceTableOptions.isEmpty) {
+            return 'Create a standard table with data before editing this summary table';
+          }
+          if (summaryColumns.isEmpty) {
+            return 'Add at least one summary column';
+          }
+          bool hasGroupBy = false;
+          for (final SummaryColumnDraft column in summaryColumns) {
+            if (column.nameController.text.trim().isEmpty) {
+              return 'Every summary column needs a name';
+            }
+            if (column.sourceTableId.value == null ||
+                column.sourceColumnId.value == null) {
+              return 'Select source table and source column for each summary column';
+            }
+            if (column.groupBy.value) {
+              hasGroupBy = true;
+            }
+            if (column.valueMode.value == SummaryValueMode.formula &&
+                column.formulaController.text.trim().isEmpty) {
+              return 'Formula is required for formula summary columns';
+            }
+          }
+          if (!hasGroupBy) {
+            return 'Mark at least one summary column as Group By';
+          }
+        }
         return null;
       case 1:
         if (tableNameController.text.trim().isEmpty) {
@@ -1762,14 +1979,16 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
         }
         return _validateEditColumns();
       case 4:
-        if (crudStd) {
-          return _validateAffectingTables();
-        }
         if (isSummary) {
           return (tableNameController.text.trim().isEmpty
                   ? 'Table name is required'
                   : null) ??
               (selectedPageId.value == null ? 'Assign page is required' : null);
+        }
+        return _validateCustomValidationRules();
+      case 5:
+        if (crudStd) {
+          return _validateAffectingTables();
         }
         return _validateEditColumns() ??
             (tableNameController.text.trim().isEmpty
@@ -1777,7 +1996,7 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
                 : null) ??
             (selectedPageId.value == null ? 'Assign page is required' : null) ??
             (persistedListDesign == null ? 'Table layout is missing' : null);
-      case 5:
+      case 6:
         if (isSummary || crudStd) {
           return (tableNameController.text.trim().isEmpty
                   ? 'Table name is required'
@@ -1785,7 +2004,7 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
               (selectedPageId.value == null ? 'Assign page is required' : null);
         }
         return null;
-      case 6:
+      case 7:
         if (isSummary) {
           return (tableNameController.text.trim().isEmpty
                   ? 'Table name is required'
@@ -1844,19 +2063,22 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       showAppSnackbar('Validation', 'Table name is required');
       return;
     }
-    if (columns.isEmpty) {
-      showAppSnackbar('Validation', 'At least one column is required');
-      return;
-    }
-    for (final EditColumnDraft column in columns) {
-      if (column.nameController.text.trim().isEmpty) {
-        showAppSnackbar('Validation', 'Column name is required');
+    final bool isSummary = current.tableKind == TableKind.summary;
+    if (!isSummary) {
+      if (columns.isEmpty) {
+        showAppSnackbar('Validation', 'At least one column is required');
         return;
+      }
+      for (final EditColumnDraft column in columns) {
+        if (column.nameController.text.trim().isEmpty) {
+          showAppSnackbar('Validation', 'Column name is required');
+          return;
+        }
       }
     }
 
     dropdownFieldErrors.clear();
-    for (final EditColumnDraft col in columns) {
+    for (final EditColumnDraft col in isSummary ? const <EditColumnDraft>[] : columns) {
       if (col.type.value != TableColumnType.dropdown) {
         continue;
       }
@@ -1884,7 +2106,7 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       showAppSnackbar('Validation', dropdownFieldErrors.values.first);
       return;
     }
-    for (final EditColumnDraft col in columns) {
+    for (final EditColumnDraft col in isSummary ? const <EditColumnDraft>[] : columns) {
       if (col.type.value != TableColumnType.text) {
         continue;
       }
@@ -1909,7 +2131,7 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       }
     }
 
-    if (!await _validateFormulaColumnsForSave()) {
+    if (!isSummary && !await _validateFormulaColumnsForSave()) {
       showAppSnackbar('Validation', 'Fix formula errors before saving');
       return;
     }
@@ -1966,14 +2188,101 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
     try {
       _syncGuidedFormulasToControllers();
       final TableMode savedMode = mode.value;
-      final List<TableColumnEntity> updatedColumns = columns
-          .map((EditColumnDraft c) => c.toEntityForMode(savedMode))
-          .toList(growable: false);
+      TableSummaryConfig? summaryCfg = current.summaryConfig;
+      final List<TableColumnEntity> updatedColumns;
+      if (isSummary) {
+        if (summaryColumns.isEmpty) {
+          showAppSnackbar('Validation', 'Add at least one summary column');
+          return;
+        }
+        final List<SummaryColumnConfig> summaryColumnConfigs =
+            <SummaryColumnConfig>[];
+        for (final SummaryColumnDraft draft in summaryColumns) {
+          final String? sourceTableId = draft.sourceTableId.value;
+          final String? sourceColumnId = draft.sourceColumnId.value;
+          if (sourceTableId == null || sourceColumnId == null) {
+            showAppSnackbar('Validation', 'Summary column source is required');
+            return;
+          }
+          summaryColumnConfigs.add(
+            SummaryColumnConfig(
+              id: draft.id,
+              name:
+                  draft.nameController.text.trim().isEmpty
+                      ? 'Column'
+                      : draft.nameController.text.trim(),
+              sourceTableId: sourceTableId,
+              sourceColumnId: sourceColumnId,
+              groupBy: draft.groupBy.value,
+              valueMode: draft.valueMode.value,
+              aggregation: draft.aggregation.value,
+              formula:
+                  draft.formulaController.text.trim().isEmpty
+                      ? null
+                      : draft.formulaController.text.trim(),
+            ),
+          );
+        }
+        final SummaryColumnConfig primary = summaryColumnConfigs.firstWhere(
+          (SummaryColumnConfig c) => c.groupBy,
+          orElse: () => summaryColumnConfigs.first,
+        );
+        if (primary.sourceTableId == null || primary.sourceColumnId == null) {
+          showAppSnackbar('Validation', 'Primary grouping column is invalid');
+          return;
+        }
+        summaryCfg = TableSummaryConfig(
+          sourceTableId: primary.sourceTableId!,
+          groupByColumnId: primary.sourceColumnId!,
+          aggregateSourceColumnId: primary.sourceColumnId!,
+          operation: primary.aggregation,
+          columns: summaryColumnConfigs,
+        );
+        updatedColumns = summaryColumns
+            .map((SummaryColumnDraft draft) {
+              final String colName = draft.nameController.text.trim();
+              final TableColumnType colType =
+                  draft.valueMode.value == SummaryValueMode.aggregation
+                      ? TableColumnType.number
+                      : TableColumnType.text;
+              return TableColumnEntity(
+                id: draft.id,
+                name: colName.isEmpty ? 'Column' : colName,
+                type: colType,
+                includeInCreateForm: false,
+                includeInEditForm: false,
+                isRequired: false,
+                pattern: null,
+                formula: null,
+                formulaDefinition: null,
+                dropdownOptions: const <String>[],
+                dropdownSourceKind: TableColumnDropdownSourceKind.manual,
+                dropdownSourceTableId: null,
+                dropdownSourceColumnId: null,
+                textFieldHint: null,
+                textPrefixIconKey: null,
+                textSuffixIconKey: null,
+                textValidationKind: TableTextValidationKind.none,
+                textCustomRegex: null,
+              );
+            })
+            .toList(growable: false);
+      } else {
+        updatedColumns = columns
+            .map((EditColumnDraft c) => c.toEntityForMode(savedMode))
+            .toList(growable: false);
+      }
       final bool swipe = swipeToDelete.value;
       final String pageId = selectedPageId.value ?? current.pageId;
       final String desc = descriptionController.text.trim();
       final List<TableAffectingConfig> affectingCfg =
           _buildAffectingTablesConfig();
+      final List<TableValidationRule> validationRulesCfg =
+          isSummary
+              ? const <TableValidationRule>[]
+              : validationRules
+                  .map((TableValidationRuleDraft draft) => draft.toEntity())
+                  .toList(growable: false);
       await _save(
         TableSchemaEntity(
           id: current.id,
@@ -1986,9 +2295,10 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
           swipeToDelete: swipe,
           productDisplayMode: current.productDisplayMode,
           tableKind: current.tableKind,
-          summaryConfig: current.summaryConfig,
+          summaryConfig: summaryCfg,
           inventoryDeduction: invCfg,
           affectingTables: affectingCfg,
+          validationRules: validationRulesCfg,
           searchEnabled: searchEnabled.value,
           dataLoadingMode: dataLoadingMode.value,
           pageSize: pageSize.value,
@@ -2007,9 +2317,10 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
         swipeToDelete: swipe,
         productDisplayMode: current.productDisplayMode,
         tableKind: current.tableKind,
-        summaryConfig: current.summaryConfig,
+        summaryConfig: summaryCfg,
         inventoryDeduction: invCfg,
         affectingTables: affectingCfg,
+        validationRules: validationRulesCfg,
         searchEnabled: searchEnabled.value,
         dataLoadingMode: dataLoadingMode.value,
         pageSize: pageSize.value,
@@ -2059,6 +2370,26 @@ class PageOption {
   final String name;
 }
 
+class SummaryColumnDraft {
+  SummaryColumnDraft({required this.id, TextEditingController? nameController})
+    : nameController = nameController ?? TextEditingController();
+
+  final String id;
+  final TextEditingController nameController;
+  final RxnString sourceTableId = RxnString();
+  final RxnString sourceColumnId = RxnString();
+  final RxBool groupBy = false.obs;
+  final Rx<SummaryValueMode> valueMode = SummaryValueMode.uniqueValue.obs;
+  final Rx<SummaryAggregationOperation> aggregation =
+      SummaryAggregationOperation.sum.obs;
+  final TextEditingController formulaController = TextEditingController();
+
+  void dispose() {
+    nameController.dispose();
+    formulaController.dispose();
+  }
+}
+
 class AffectingColumnRuleDraft {
   AffectingColumnRuleDraft({required this.id});
 
@@ -2085,6 +2416,35 @@ class AffectingTableDraft {
     for (final AffectingColumnRuleDraft rule in rules) {
       rule.dispose();
     }
+  }
+}
+
+class TableValidationRuleDraft {
+  TableValidationRuleDraft({required this.id, TextEditingController? nameController})
+    : nameController = nameController ?? TextEditingController();
+
+  final String id;
+  final TextEditingController nameController;
+  final TextEditingController conditionController = TextEditingController();
+  final TextEditingController errorMessageController = TextEditingController();
+  final RxBool enabled = true.obs;
+
+  TableValidationRule toEntity() {
+    return TableValidationRule(
+      id: id,
+      name: nameController.text.trim().isEmpty
+          ? 'Validation rule'
+          : nameController.text.trim(),
+      conditionFormula: conditionController.text.trim(),
+      errorMessage: errorMessageController.text.trim(),
+      enabled: enabled.value,
+    );
+  }
+
+  void dispose() {
+    nameController.dispose();
+    conditionController.dispose();
+    errorMessageController.dispose();
   }
 }
 
@@ -2119,6 +2479,7 @@ class EditColumnDraft implements GuidedFormulaColumnLike {
     draft.textSuffixIconKey.value = sfx != null && sfx.isNotEmpty ? sfx : null;
     draft.textValidationKind.value = entity.textValidationKind;
     draft.textCustomRegexController.text = entity.textCustomRegex ?? '';
+    draft.dateDefaultToday.value = entity.dateDefaultToday;
     draft.numberHintController.text = entity.numberFieldHint ?? '';
     draft.numberPrefixController.text = entity.numberPrefixText ?? '';
     draft.numberSuffixController.text = entity.numberSuffixText ?? '';
@@ -2188,6 +2549,7 @@ class EditColumnDraft implements GuidedFormulaColumnLike {
 
   final Rx<TableTextValidationKind> textValidationKind =
       TableTextValidationKind.none.obs;
+  final RxBool dateDefaultToday = false.obs;
   final RxnString textPrefixIconKey = RxnString();
   final RxnString textSuffixIconKey = RxnString();
   final RxBool numberAllowDecimals = true.obs;
@@ -2312,6 +2674,8 @@ class EditColumnDraft implements GuidedFormulaColumnLike {
                   ? null
                   : textCustomRegexController.text.trim())
               : null,
+      dateDefaultToday:
+          type.value == TableColumnType.date ? dateDefaultToday.value : false,
       numberFieldHint:
           type.value == TableColumnType.number
               ? (numberHintController.text.trim().isEmpty
@@ -2396,6 +2760,7 @@ class EditColumnDraft implements GuidedFormulaColumnLike {
         textSuffixIconKey: e.textSuffixIconKey,
         textValidationKind: e.textValidationKind,
         textCustomRegex: e.textCustomRegex,
+        dateDefaultToday: e.dateDefaultToday,
         numberFieldHint: e.numberFieldHint,
         numberPrefixText: e.numberPrefixText,
         numberSuffixText: e.numberSuffixText,

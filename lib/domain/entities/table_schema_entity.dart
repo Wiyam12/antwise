@@ -8,6 +8,7 @@ import 'package:antwise/domain/entities/table_list_design_layout.dart';
 import 'package:antwise/domain/entities/table_mode.dart';
 import 'package:antwise/domain/entities/table_inventory_deduction_config.dart';
 import 'package:antwise/domain/entities/table_summary_config.dart';
+import 'package:antwise/domain/entities/table_validation_rule.dart';
 
 class TableSchemaEntity {
   const TableSchemaEntity({
@@ -24,6 +25,7 @@ class TableSchemaEntity {
     this.summaryConfig,
     this.inventoryDeduction,
     this.affectingTables = const <TableAffectingConfig>[],
+    this.validationRules = const <TableValidationRule>[],
     this.searchEnabled = false,
     this.dataLoadingMode = TableDataLoadingMode.lazy,
     this.pageSize = 10,
@@ -58,6 +60,9 @@ class TableSchemaEntity {
 
   /// Optional CRUD side effects to apply on other tables by row matching.
   final List<TableAffectingConfig> affectingTables;
+
+  /// Optional pre-save rules evaluated before creating/updating table rows.
+  final List<TableValidationRule> validationRules;
 
   /// Optional search box visibility for runtime table view.
   final bool searchEnabled;

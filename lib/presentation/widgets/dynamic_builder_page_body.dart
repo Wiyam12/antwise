@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:antwise/core/app_snackbar.dart';
 import 'package:antwise/core/icons/app_icon_registry.dart';
 import 'package:antwise/domain/entities/builder_page_entity.dart';
 import 'package:antwise/domain/entities/builder_widget_entity.dart';
@@ -15,6 +16,7 @@ import 'package:antwise/domain/entities/table_kind.dart';
 import 'package:antwise/domain/entities/table_mode.dart';
 import 'package:antwise/domain/entities/table_row_entity.dart';
 import 'package:antwise/domain/entities/table_schema_entity.dart';
+import 'package:antwise/domain/entities/table_validation_rule.dart';
 import 'package:antwise/domain/dropdown/dropdown_column_options.dart';
 import 'package:antwise/domain/summary/compute_summary_table_rows.dart';
 import 'package:antwise/domain/formula/table_formula_evaluator.dart';
@@ -31,7 +33,7 @@ import 'package:antwise/domain/usecases/save_table_row_usecase.dart';
 import 'package:antwise/domain/usecases/update_table_row_usecase.dart';
 import 'package:antwise/presentation/bindings/builder_page_runtime_deps.dart';
 import 'package:antwise/presentation/controllers/home_controller.dart';
-import 'package:antwise/presentation/widgets/searchable_dropdown_options_field.dart';
+import 'package:antwise/presentation/widgets/searchable_dropdown_field.dart';
 import 'package:antwise/presentation/widgets/table_row_modal_field_helpers.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -87,6 +89,8 @@ const String _kEmptyCellDisplay = '-';
 
 String _tableLayoutKey(String tableId) => 'table:$tableId';
 String _chartLayoutKey(String widgetId) => 'chart:$widgetId';
+
+enum _ChartDateGrouping { daily, weekly, monthly, yearly }
 
 /// Compact, non-interactive table preview tile for layout pickers.
 class TableLayoutOptionPreview extends StatelessWidget {
@@ -544,6 +548,8 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
   final Map<String, int> _tableCurrentPages = <String, int>{};
   final Map<String, int> _tablePageSizes = <String, int>{};
   final Map<String, int> _touchedPieIndexByChartId = <String, int>{};
+  final Map<String, _ChartDateGrouping> _selectedDateGroupingByChartId =
+      <String, _ChartDateGrouping>{};
   bool _isLoading = true;
 
   /// Caches [TableFormulaEvaluator.resolveRowValues] per row for list builds.
@@ -605,6 +611,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       }
       rowsByTable[schema.id] = computeSummaryTableRows(
         summarySchema: schema,
+        allSchemas: allSchemas,
         rowsByTableId: rowsByTable,
       );
     }
@@ -820,7 +827,24 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
     TableRowEntity row,
     String columnId,
   ) {
-    return _resolvedRowValues(schema, row)[columnId]?.toString() ?? '';
+    final dynamic rawValue = _resolvedRowValues(schema, row)[columnId];
+    if (rawValue == null) {
+      return '';
+    }
+    TableColumnEntity? column;
+    for (final TableColumnEntity candidate in schema.columns) {
+      if (candidate.id == columnId) {
+        column = candidate;
+        break;
+      }
+    }
+    if (column?.type == TableColumnType.date) {
+      final DateTime? parsed = DateTime.tryParse(rawValue.toString().trim());
+      if (parsed != null) {
+        return _formatDate(parsed);
+      }
+    }
+    return rawValue.toString();
   }
 
   bool _isTextLikeColumn(TableColumnType type) {
@@ -996,7 +1020,8 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
         if (raw is String && raw.isNotEmpty) {
           dateValues[c.id] = DateTime.tryParse(raw);
         } else {
-          dateValues[c.id] = null;
+          dateValues[c.id] =
+              !isEdit && c.dateDefaultToday ? DateTime.now() : null;
         }
       } else if (c.type == TableColumnType.image) {
         imageValues[c.id] = values[c.id]?.toString();
@@ -1183,11 +1208,19 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                                         );
                                     final TextEditingController ctrl =
                                         textCtrls[col.id]!;
-                                    return SearchableDropdownOptionsField(
+                                    final String selectedValue =
+                                        ctrl.text.trim();
+                                    return SearchableDropdownField<String>(
                                       label: col.name,
                                       options: options,
-                                      controller: ctrl,
-                                      onChanged: () {
+                                      value:
+                                          options.contains(selectedValue)
+                                              ? selectedValue
+                                              : null,
+                                      optionLabel: (String option) => option,
+                                      hintText: 'Search option...',
+                                      onChanged: (String selected) {
+                                        ctrl.text = selected;
                                         setModalState(() {
                                           final String? msg =
                                               TableRowModalFieldValidators.validate(
@@ -1824,6 +1857,17 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
         values[col.id] = _generateAutoValue(col, schema.id);
       }
     }
+
+    final String? validationError = _runCustomValidationRules(
+      schema: schema,
+      values: values,
+    );
+    if (validationError != null && validationError.isNotEmpty) {
+      showAppSnackbar('Validation', validationError);
+      _disposeTextControllersSafely(textCtrls);
+      return;
+    }
+
     _disposeTextControllersSafely(textCtrls);
 
     final TableRowEntity row = TableRowEntity(
@@ -1854,6 +1898,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
           /* best-effort; row is already saved */
         }
       }
+      showAppSnackbar('${schema.name} Table', 'Data added');
     } else {
       await _updateRow(row);
       if (schema.tableKind != TableKind.summary) {
@@ -1868,6 +1913,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
           /* best-effort; row is already updated */
         }
       }
+      showAppSnackbar('${schema.name} Table', 'Data updated');
     }
     await _load();
   }
@@ -1879,6 +1925,18 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
             ? column.pattern!.trim()
             : '{YYYY}-{RAND4}';
     return pattern
+        .replaceAll('(DAY)', now.day.toString().padLeft(2, '0'))
+        .replaceAll('(MONTH)', now.month.toString().padLeft(2, '0'))
+        .replaceAll('(YEAR)', now.year.toString())
+        .replaceAll('(YEAR-2dig)', (now.year % 100).toString().padLeft(2, '0'))
+        .replaceAll(
+          '(SEQ)',
+          ((_rowsByTable[tableId]?.length ?? 0) + 1).toString().padLeft(4, '0'),
+        )
+        .replaceAll('(HOUR)', now.hour.toString().padLeft(2, '0'))
+        .replaceAll('(MIN)', now.minute.toString().padLeft(2, '0'))
+        .replaceAll('(USER)', 'USER')
+        .replaceAll('(BRANCH)', 'MAIN')
         .replaceAll('{YYYY}', now.year.toString())
         .replaceAll('{MM}', now.month.toString().padLeft(2, '0'))
         .replaceAll('{DD}', now.day.toString().padLeft(2, '0'))
@@ -1889,6 +1947,56 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
         )
         .replaceAll('{DATE}', _compactDate(now))
         .replaceAll('{TABLE}', widget.page.name.toUpperCase());
+  }
+
+  String? _runCustomValidationRules({
+    required TableSchemaEntity schema,
+    required Map<String, dynamic> values,
+  }) {
+    if (schema.validationRules.isEmpty) {
+      return null;
+    }
+    for (final TableValidationRule rule in schema.validationRules) {
+      if (!rule.enabled) {
+        continue;
+      }
+      final String formula = rule.conditionFormula.trim();
+      if (formula.isEmpty) {
+        continue;
+      }
+      final String result = TableFormulaEvaluator.evaluate(
+        formula: formula,
+        currentSchema: schema,
+        workingRowByColId: values,
+        allSchemas: _allSchemas,
+        rowsByTableId: _rowsByTable,
+        forColumnId: null,
+      );
+      if (!_isValidationFormulaTrue(result)) {
+        return rule.errorMessage.trim().isEmpty
+            ? 'Validation failed for rule "${rule.name}".'
+            : rule.errorMessage.trim();
+      }
+    }
+    return null;
+  }
+
+  bool _isValidationFormulaTrue(String value) {
+    final String normalized = value.trim().toLowerCase();
+    if (normalized.isEmpty ||
+        normalized == 'false' ||
+        normalized == '0' ||
+        normalized == 'no') {
+      return false;
+    }
+    if (normalized == 'true' || normalized == 'yes') {
+      return true;
+    }
+    final num? asNum = num.tryParse(normalized);
+    if (asNum != null) {
+      return asNum != 0;
+    }
+    return normalized == 'ok' || normalized == 'pass';
   }
 
   Future<void> _deleteRecord(
@@ -1922,6 +2030,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       return;
     }
     await _deleteRow(row.id);
+    showAppSnackbar('${schema.name} Table', 'Data deleted');
     await _load();
   }
 
@@ -1944,10 +2053,22 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
   }
 
   String _formatDate(DateTime date) {
-    final String year = date.year.toString();
-    final String month = date.month.toString().padLeft(2, '0');
-    final String day = date.day.toString().padLeft(2, '0');
-    return '$year-$month-$day';
+    const List<String> months = <String>[
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sept',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final String month = months[(date.month - 1).clamp(0, 11)];
+    return '$month ${date.day}, ${date.year}';
   }
 
   String _fileName(String? path) {
@@ -2170,14 +2291,15 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
             card.config['formula']?.toString().trim() ?? '';
         String heroValue = value;
         if (heroFormula.isNotEmpty && _allSchemas.isNotEmpty) {
-          final String evaluated = TableFormulaEvaluator.evaluate(
-            formula: heroFormula,
-            currentSchema: _allSchemas.first,
-            workingRowByColId: const <String, dynamic>{},
-            allSchemas: _allSchemas,
-            rowsByTableId: _rowsByTable,
-            forColumnId: '_hero_card',
-          ).trim();
+          final String evaluated =
+              TableFormulaEvaluator.evaluate(
+                formula: heroFormula,
+                currentSchema: _allSchemas.first,
+                workingRowByColId: const <String, dynamic>{},
+                allSchemas: _allSchemas,
+                rowsByTableId: _rowsByTable,
+                forColumnId: '_hero_card',
+              ).trim();
           if (evaluated.isNotEmpty) {
             heroValue = evaluated;
           }
@@ -2551,6 +2673,9 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
         chartWidget.config['formula']?.toString().trim() ?? '';
     final String chartType =
         chartWidget.config['chartType']?.toString() ?? 'bar';
+    final List<_ChartDateGrouping> enabledDateFilters = _readEnabledDateFilters(
+      chartWidget.config['enabledDateFilters'],
+    );
 
     TableSchemaEntity? table;
     for (final TableSchemaEntity s in _allSchemas) {
@@ -2575,56 +2700,49 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
 
     final List<TableRowEntity> rows =
         _rowsByTable[table.id] ?? <TableRowEntity>[];
-    final Map<String, double> groupedPoints = <String, double>{};
-    for (final TableRowEntity row in rows) {
-      final Map<String, dynamic> resolved = _resolvedRowValues(table, row);
-      final String rawLabel =
-          (resolved[xColumnId] ?? row.values[xColumnId] ?? '').toString();
-      final String label = rawLabel.trim();
-      if (label.isEmpty) {
-        continue;
+    TableColumnEntity? xColumn;
+    for (final TableColumnEntity col in table.columns) {
+      if (col.id == xColumnId) {
+        xColumn = col;
+        break;
       }
-      double? value;
-      if (formula.isNotEmpty) {
-        final String raw = TableFormulaEvaluator.evaluate(
-          formula: formula,
-          currentSchema: table,
-          workingRowByColId: row.values,
-          allSchemas: _allSchemas,
-          rowsByTableId: _rowsByTable,
-          forColumnId: '_chart',
-        );
-        value = _toDouble(raw);
-      } else if (yColumnId != null && yColumnId.isNotEmpty) {
-        value = _toDouble(
-          (resolved[yColumnId] ?? row.values[yColumnId]).toString(),
-        );
-      }
-      if (value == null) {
-        continue;
-      }
-      final double numericValue = value;
-      groupedPoints.update(
-        label,
-        (double old) => old + numericValue,
-        ifAbsent: () => numericValue,
-      );
     }
-    final List<({String label, double value})> points = groupedPoints.entries
-        .map((MapEntry<String, double> e) => (label: e.key, value: e.value))
-        .toList(growable: false);
+    final bool canUseDateGrouping =
+        chartType == 'line' &&
+        xColumn?.type == TableColumnType.date &&
+        enabledDateFilters.isNotEmpty;
+    final _ChartDateGrouping activeDateGrouping =
+        _selectedDateGroupingByChartId[chartWidget.id] ??
+        _firstDateGroupingOrDefault(enabledDateFilters);
+    if (canUseDateGrouping &&
+        !_selectedDateGroupingByChartId.containsKey(chartWidget.id)) {
+      _selectedDateGroupingByChartId[chartWidget.id] = activeDateGrouping;
+    }
+    final List<({String label, double value})> points =
+        canUseDateGrouping
+            ? _buildDateGroupedChartPoints(
+              rows: rows,
+              table: table,
+              xColumnId: xColumnId,
+              yColumnId: yColumnId,
+              formula: formula,
+              grouping: activeDateGrouping,
+            )
+            : _buildDefaultChartPoints(
+              rows: rows,
+              table: table,
+              xColumn: xColumn,
+              xColumnId: xColumnId,
+              yColumnId: yColumnId,
+              formula: formula,
+            );
 
     if (points.isEmpty) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Text(
-            title.isEmpty
-                ? 'No chart data available.'
-                : '$title: no chart data.',
-            style: theme.textTheme.bodyMedium,
-          ),
-        ),
+      return _buildNoDataChartCard(
+        theme: theme,
+        title: title,
+        chartType: chartType,
+        compact: compact,
       );
     }
 
@@ -2645,6 +2763,30 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                   style: theme.textTheme.titleSmall,
                 ),
               ),
+            if (canUseDateGrouping) ...<Widget>[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: enabledDateFilters
+                    .map((_ChartDateGrouping grouping) {
+                      return ChoiceChip(
+                        label: Text(_dateGroupingLabel(grouping)),
+                        selected: activeDateGrouping == grouping,
+                        onSelected: (bool selected) {
+                          if (!selected) {
+                            return;
+                          }
+                          setState(() {
+                            _selectedDateGroupingByChartId[chartWidget.id] =
+                                grouping;
+                          });
+                        },
+                      );
+                    })
+                    .toList(growable: false),
+              ),
+              const SizedBox(height: 10),
+            ],
             SizedBox(
               height: chartHeight,
               child: switch (chartType) {
@@ -2660,6 +2802,444 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
         ),
       ),
     );
+  }
+
+  Widget _buildNoDataChartCard({
+    required ThemeData theme,
+    required String title,
+    required String chartType,
+    required bool compact,
+  }) {
+    final double chartHeight = compact ? 160 : 220;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            if (title.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall,
+                ),
+              ),
+            SizedBox(
+              height: chartHeight,
+              child: Stack(
+                alignment: Alignment.center,
+                children: <Widget>[
+                  if (chartType == 'line')
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: _buildLineNoDataBackdrop(theme),
+                    )
+                  else if (chartType == 'pie')
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: _buildPieNoDataBackdrop(theme),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: _buildBarNoDataBackdrop(theme),
+                    ),
+                  Text(
+                    'No Data',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLineNoDataBackdrop(ThemeData theme) {
+    final Color muted = theme.colorScheme.outlineVariant.withValues(
+      alpha: 0.55,
+    );
+    return LineChart(
+      LineChartData(
+        minY: 0,
+        maxY: 8,
+        borderData: FlBorderData(show: true, border: Border.all(color: muted)),
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: true,
+          getDrawingHorizontalLine:
+              (_) =>
+                  FlLine(color: muted.withValues(alpha: 0.45), strokeWidth: 1),
+          getDrawingVerticalLine:
+              (_) =>
+                  FlLine(color: muted.withValues(alpha: 0.45), strokeWidth: 1),
+        ),
+        lineTouchData: const LineTouchData(enabled: false),
+        titlesData: FlTitlesData(
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              interval: 2,
+              reservedSize: 28,
+              getTitlesWidget:
+                  (double value, TitleMeta meta) => Text(
+                    value.toInt().toString(),
+                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                  ),
+            ),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget:
+                  (double value, TitleMeta meta) => Text(
+                    'Label ${value.toInt()}',
+                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                  ),
+            ),
+          ),
+        ),
+        lineBarsData: <LineChartBarData>[
+          LineChartBarData(
+            spots: const <FlSpot>[
+              FlSpot(0, 5),
+              FlSpot(1, 8),
+              FlSpot(2, 7),
+              FlSpot(3, 6),
+              FlSpot(4, 2),
+            ],
+            isCurved: false,
+            barWidth: 2.5,
+            color: muted,
+            dotData: FlDotData(show: false),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPieNoDataBackdrop(ThemeData theme) {
+    final Color muted = theme.colorScheme.outlineVariant.withValues(
+      alpha: 0.55,
+    );
+    return PieChart(
+      PieChartData(
+        sectionsSpace: 2,
+        centerSpaceRadius: 52,
+        sections: <PieChartSectionData>[
+          PieChartSectionData(value: 24, color: muted.withValues(alpha: 0.9)),
+          PieChartSectionData(value: 20, color: muted.withValues(alpha: 0.75)),
+          PieChartSectionData(value: 18, color: muted.withValues(alpha: 0.65)),
+          PieChartSectionData(value: 15, color: muted.withValues(alpha: 0.55)),
+          PieChartSectionData(value: 23, color: muted.withValues(alpha: 0.45)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBarNoDataBackdrop(ThemeData theme) {
+    final Color muted = theme.colorScheme.outlineVariant.withValues(
+      alpha: 0.55,
+    );
+    return BarChart(
+      BarChartData(
+        minY: 0,
+        maxY: 8,
+        borderData: FlBorderData(show: true, border: Border.all(color: muted)),
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: true,
+          getDrawingHorizontalLine:
+              (_) =>
+                  FlLine(color: muted.withValues(alpha: 0.45), strokeWidth: 1),
+          getDrawingVerticalLine:
+              (_) =>
+                  FlLine(color: muted.withValues(alpha: 0.45), strokeWidth: 1),
+        ),
+        barTouchData: const BarTouchData(enabled: false),
+        titlesData: FlTitlesData(
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              interval: 2,
+              reservedSize: 28,
+              getTitlesWidget:
+                  (double value, TitleMeta meta) => Text(
+                    value.toInt().toString(),
+                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                  ),
+            ),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget:
+                  (double value, TitleMeta meta) => Text(
+                    'Label ${value.toInt()}',
+                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                  ),
+            ),
+          ),
+        ),
+        barGroups: <BarChartGroupData>[
+          for (int i = 0; i < 5; i++)
+            BarChartGroupData(
+              x: i,
+              barRods: <BarChartRodData>[
+                BarChartRodData(
+                  toY: <double>[5, 8, 7, 6, 2][i],
+                  width: 24,
+                  color: muted.withValues(alpha: 0.7),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  _ChartDateGrouping _firstDateGroupingOrDefault(
+    List<_ChartDateGrouping> enabled,
+  ) {
+    if (enabled.isNotEmpty) {
+      return enabled.first;
+    }
+    return _ChartDateGrouping.daily;
+  }
+
+  List<_ChartDateGrouping> _readEnabledDateFilters(dynamic raw) {
+    final List<_ChartDateGrouping> out = <_ChartDateGrouping>[];
+    if (raw is! List) {
+      return out;
+    }
+    for (final dynamic item in raw) {
+      final String token = item.toString().trim().toLowerCase();
+      for (final _ChartDateGrouping g in _ChartDateGrouping.values) {
+        if (g.name == token) {
+          out.add(g);
+          break;
+        }
+      }
+    }
+    const List<_ChartDateGrouping> order = <_ChartDateGrouping>[
+      _ChartDateGrouping.daily,
+      _ChartDateGrouping.weekly,
+      _ChartDateGrouping.monthly,
+      _ChartDateGrouping.yearly,
+    ];
+    final List<_ChartDateGrouping> sorted = <_ChartDateGrouping>[];
+    for (final _ChartDateGrouping g in order) {
+      if (out.contains(g)) {
+        sorted.add(g);
+      }
+    }
+    return sorted;
+  }
+
+  String _dateGroupingLabel(_ChartDateGrouping grouping) {
+    return switch (grouping) {
+      _ChartDateGrouping.daily => 'Daily',
+      _ChartDateGrouping.weekly => 'Weekly',
+      _ChartDateGrouping.monthly => 'Monthly',
+      _ChartDateGrouping.yearly => 'Yearly',
+    };
+  }
+
+  List<({String label, double value})> _buildDefaultChartPoints({
+    required List<TableRowEntity> rows,
+    required TableSchemaEntity table,
+    required TableColumnEntity? xColumn,
+    required String xColumnId,
+    required String? yColumnId,
+    required String formula,
+  }) {
+    final Map<String, double> groupedPoints = <String, double>{};
+    for (final TableRowEntity row in rows) {
+      final Map<String, dynamic> resolved = _resolvedRowValues(table, row);
+      final String rawLabel =
+          (resolved[xColumnId] ?? row.values[xColumnId] ?? '').toString();
+      String label = rawLabel.trim();
+      if (xColumn?.type == TableColumnType.date && label.isNotEmpty) {
+        final DateTime? parsed = DateTime.tryParse(label);
+        if (parsed != null) {
+          label = _formatDate(parsed);
+        }
+      }
+      if (label.isEmpty) {
+        continue;
+      }
+      final double? value = _chartPointValue(
+        row: row,
+        table: table,
+        resolved: resolved,
+        yColumnId: yColumnId,
+        formula: formula,
+      );
+      if (value == null) {
+        continue;
+      }
+      groupedPoints.update(
+        label,
+        (double old) => old + value,
+        ifAbsent: () => value,
+      );
+    }
+    return groupedPoints.entries
+        .map((MapEntry<String, double> e) => (label: e.key, value: e.value))
+        .toList(growable: false);
+  }
+
+  List<({String label, double value})> _buildDateGroupedChartPoints({
+    required List<TableRowEntity> rows,
+    required TableSchemaEntity table,
+    required String xColumnId,
+    required String? yColumnId,
+    required String formula,
+    required _ChartDateGrouping grouping,
+  }) {
+    final Map<String, ({double total, DateTime sortDate})> grouped =
+        <String, ({double total, DateTime sortDate})>{};
+    for (final TableRowEntity row in rows) {
+      final Map<String, dynamic> resolved = _resolvedRowValues(table, row);
+      final String rawLabel =
+          (resolved[xColumnId] ?? row.values[xColumnId] ?? '')
+              .toString()
+              .trim();
+      final DateTime? date = DateTime.tryParse(rawLabel);
+      if (date == null) {
+        continue;
+      }
+      final double? value = _chartPointValue(
+        row: row,
+        table: table,
+        resolved: resolved,
+        yColumnId: yColumnId,
+        formula: formula,
+      );
+      if (value == null) {
+        continue;
+      }
+      final ({String label, DateTime sortDate}) bucket = _dateBucket(
+        date,
+        grouping,
+      );
+      final ({double total, DateTime sortDate})? existing =
+          grouped[bucket.label];
+      if (existing == null) {
+        grouped[bucket.label] = (total: value, sortDate: bucket.sortDate);
+      } else {
+        grouped[bucket.label] = (
+          total: existing.total + value,
+          sortDate: existing.sortDate,
+        );
+      }
+    }
+    final List<({String label, double value, DateTime sortDate})> entries =
+        grouped.entries
+            .map(
+              (MapEntry<String, ({double total, DateTime sortDate})> e) => (
+                label: e.key,
+                value: e.value.total,
+                sortDate: e.value.sortDate,
+              ),
+            )
+            .toList(growable: false)
+          ..sort((a, b) => a.sortDate.compareTo(b.sortDate));
+    return entries
+        .map((e) => (label: e.label, value: e.value))
+        .toList(growable: false);
+  }
+
+  ({String label, DateTime sortDate}) _dateBucket(
+    DateTime date,
+    _ChartDateGrouping grouping,
+  ) {
+    switch (grouping) {
+      case _ChartDateGrouping.daily:
+        return (
+          label: _formatDate(date),
+          sortDate: DateTime(date.year, date.month, date.day),
+        );
+      case _ChartDateGrouping.weekly:
+        final DateTime monday = date.subtract(
+          Duration(days: date.weekday - DateTime.monday),
+        );
+        final DateTime firstMonday = DateTime(monday.year, 1, 1).subtract(
+          Duration(days: DateTime(monday.year, 1, 1).weekday - DateTime.monday),
+        );
+        final int week = (monday.difference(firstMonday).inDays ~/ 7) + 1;
+        return (
+          label: 'W${week.toString().padLeft(2, '0')} ${monday.year}',
+          sortDate: DateTime(monday.year, monday.month, monday.day),
+        );
+      case _ChartDateGrouping.monthly:
+        final DateTime monthDate = DateTime(date.year, date.month, 1);
+        const List<String> m = <String>[
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
+        ];
+        return (
+          label: '${m[date.month - 1]} ${date.year}',
+          sortDate: monthDate,
+        );
+      case _ChartDateGrouping.yearly:
+        return (label: '${date.year}', sortDate: DateTime(date.year, 1, 1));
+    }
+  }
+
+  double? _chartPointValue({
+    required TableRowEntity row,
+    required TableSchemaEntity table,
+    required Map<String, dynamic> resolved,
+    required String? yColumnId,
+    required String formula,
+  }) {
+    if (formula.isNotEmpty) {
+      final String raw = TableFormulaEvaluator.evaluate(
+        formula: formula,
+        currentSchema: table,
+        workingRowByColId: row.values,
+        allSchemas: _allSchemas,
+        rowsByTableId: _rowsByTable,
+        forColumnId: '_chart',
+      );
+      return _toDouble(raw);
+    }
+    if (yColumnId != null && yColumnId.isNotEmpty) {
+      return _toDouble(
+        (resolved[yColumnId] ?? row.values[yColumnId]).toString(),
+      );
+    }
+    return null;
   }
 
   Widget _buildBarChart(
@@ -2746,8 +3326,17 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
   ) {
     final double xInterval = _chartXAxisInterval(points.length);
     final bool rotateLabels = points.length > 3;
+    final double maxPoint = points.fold<double>(
+      0,
+      (double prev, ({String label, double value}) point) =>
+          point.value > prev ? point.value : prev,
+    );
+    final double maxY =
+        maxPoint <= 0 ? 1 : (maxPoint * 1.1).clamp(1, double.infinity);
     return LineChart(
       LineChartData(
+        minY: 0,
+        maxY: maxY,
         borderData: FlBorderData(show: false),
         gridData: const FlGridData(show: true),
         lineTouchData: LineTouchData(
@@ -2821,11 +3410,12 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
     ];
     return Column(
       children: <Widget>[
+        const SizedBox(height: 50),
         Expanded(
           child: PieChart(
             PieChartData(
               sectionsSpace: 2,
-              centerSpaceRadius: 26,
+              centerSpaceRadius: 10,
               pieTouchData: PieTouchData(
                 enabled: true,
                 touchCallback: (
@@ -3612,7 +4202,13 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
     return Card(
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
-      child: body,
+      child: InkWell(
+        onTap:
+            crudEnabled
+                ? () => _openCrudRowDetailsBottomSheet(schema, row)
+                : null,
+        child: body,
+      ),
     );
   }
 
@@ -3749,7 +4345,16 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
         ],
       ),
     );
-    return Card(margin: const EdgeInsets.only(bottom: 8), child: content);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap:
+            crudEnabled
+                ? () => _openCrudRowDetailsBottomSheet(schema, row)
+                : null,
+        child: content,
+      ),
+    );
   }
 
   TextStyle _emptyCellTextStyle(ThemeData theme) =>
@@ -3981,7 +4586,16 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
         ],
       ),
     );
-    return Card(margin: const EdgeInsets.only(bottom: 8), child: content);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap:
+            crudEnabled
+                ? () => _openCrudRowDetailsBottomSheet(schema, row)
+                : null,
+        child: content,
+      ),
+    );
   }
 
   Widget _buildVerticalDetailRow(
@@ -4135,7 +4749,117 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
         ],
       ),
     );
-    return Card(margin: const EdgeInsets.only(bottom: 8), child: content);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap:
+            crudEnabled
+                ? () => _openCrudRowDetailsBottomSheet(schema, row)
+                : null,
+        child: content,
+      ),
+    );
+  }
+
+  Future<void> _openCrudRowDetailsBottomSheet(
+    TableSchemaEntity schema,
+    TableRowEntity row,
+  ) async {
+    final ThemeData theme = Theme.of(context);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: theme.colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (BuildContext context) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text(schema.name, style: theme.textTheme.titleLarge),
+                const SizedBox(height: 6),
+                Text(
+                  _primaryLabel(schema, row),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.5,
+                  ),
+                  child: SingleChildScrollView(
+                    child: Builder(
+                      builder: (BuildContext context) {
+                        bool skippedPrimary = false;
+                        final List<Widget> detailRows = <Widget>[];
+                        for (final TableColumnEntity col in schema.columns) {
+                          final String value =
+                              _displayCell(schema, row, col.id).trim();
+                          if (!skippedPrimary && value.isNotEmpty) {
+                            skippedPrimary = true;
+                            continue;
+                          }
+                          final String shown =
+                              value.isEmpty ? _kEmptyCellDisplay : value;
+                          detailRows.add(
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Row(
+                                children: <Widget>[
+                                  Expanded(
+                                    child: Text(
+                                      col.name,
+                                      style: theme.textTheme.bodyMedium
+                                          ?.copyWith(
+                                            color:
+                                                theme
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      shown,
+                                      textAlign: TextAlign.right,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleMedium,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+                        return Column(children: detailRows);
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Close'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _openImagePreview(String imagePath) async {

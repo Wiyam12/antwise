@@ -2,10 +2,12 @@ import 'package:antwise/domain/entities/table_row_entity.dart';
 import 'package:antwise/domain/entities/table_schema_entity.dart';
 import 'package:antwise/domain/entities/table_summary_config.dart';
 import 'package:antwise/domain/entities/table_column_entity.dart';
+import 'package:antwise/domain/formula/table_formula_evaluator.dart';
 
 /// Builds derived rows for a summary table from live source rows (no persistence).
 List<TableRowEntity> computeSummaryTableRows({
   required TableSchemaEntity summarySchema,
+  required List<TableSchemaEntity> allSchemas,
   required Map<String, List<TableRowEntity>> rowsByTableId,
 }) {
   final TableSummaryConfig? cfg = summarySchema.summaryConfig;
@@ -16,6 +18,7 @@ List<TableRowEntity> computeSummaryTableRows({
     return _computeLegacySummaryRows(
       summarySchema: summarySchema,
       cfg: cfg,
+      allSchemas: allSchemas,
       rowsByTableId: rowsByTableId,
     );
   }
@@ -32,6 +35,23 @@ List<TableRowEntity> computeSummaryTableRows({
   if (seedRows.isEmpty) {
     return <TableRowEntity>[];
   }
+  final TableSchemaEntity? seedSchema = _schemaById(allSchemas, seedTableId);
+  if (seedSchema == null) {
+    return <TableRowEntity>[];
+  }
+  final List<_ResolvedSeedRow> resolvedSeedRows = seedRows
+      .map(
+        (TableRowEntity row) => _ResolvedSeedRow(
+          row: row,
+          resolved: TableFormulaEvaluator.resolveRowValues(
+            schema: seedSchema,
+            row: row,
+            allSchemas: allSchemas,
+            rowsByTableId: rowsByTableId,
+          ),
+        ),
+      )
+      .toList(growable: false);
 
   final List<SummaryColumnConfig> groupColumns = cfg.columns
       .where((SummaryColumnConfig c) => c.groupBy)
@@ -40,14 +60,14 @@ List<TableRowEntity> computeSummaryTableRows({
     groupColumns.add(seedColumn);
   }
 
-  final Map<String, List<TableRowEntity>> grouped = <String, List<TableRowEntity>>{};
-  for (final TableRowEntity row in seedRows) {
+  final Map<String, List<_ResolvedSeedRow>> grouped = <String, List<_ResolvedSeedRow>>{};
+  for (final _ResolvedSeedRow row in resolvedSeedRows) {
     final List<String> parts = <String>[];
     for (final SummaryColumnConfig gc in groupColumns) {
-      parts.add((row.values[gc.sourceColumnId] ?? '').toString());
+      parts.add(_resolvedCellValue(row, gc.sourceColumnId));
     }
     final String key = parts.join('||');
-    grouped.putIfAbsent(key, () => <TableRowEntity>[]).add(row);
+    grouped.putIfAbsent(key, () => <_ResolvedSeedRow>[]).add(row);
   }
 
   final List<String> keys = grouped.keys.toList()..sort();
@@ -56,7 +76,7 @@ List<TableRowEntity> computeSummaryTableRows({
   };
 
   return List<TableRowEntity>.generate(keys.length, (int i) {
-    final List<TableRowEntity> groupRows = grouped[keys[i]] ?? const <TableRowEntity>[];
+    final List<_ResolvedSeedRow> groupRows = grouped[keys[i]] ?? const <_ResolvedSeedRow>[];
     final Map<String, dynamic> values = <String, dynamic>{};
     for (final TableColumnEntity outCol in summarySchema.columns) {
       final SummaryColumnConfig? colCfg = configById[outCol.id];
@@ -81,20 +101,41 @@ List<TableRowEntity> computeSummaryTableRows({
 List<TableRowEntity> _computeLegacySummaryRows({
   required TableSchemaEntity summarySchema,
   required TableSummaryConfig cfg,
+  required List<TableSchemaEntity> allSchemas,
   required Map<String, List<TableRowEntity>> rowsByTableId,
 }) {
   final List<TableRowEntity> sourceRows = rowsByTableId[cfg.sourceTableId] ?? const <TableRowEntity>[];
   if (summarySchema.columns.length < 2 || sourceRows.isEmpty) {
     return <TableRowEntity>[];
   }
+  final TableSchemaEntity? sourceSchema = _schemaById(allSchemas, cfg.sourceTableId);
+  if (sourceSchema == null) {
+    return <TableRowEntity>[];
+  }
   final Map<String, double> sums = <String, double>{};
   for (final TableRowEntity row in sourceRows) {
-    final String keyStr = (row.values[cfg.groupByColumnId] ?? '').toString().trim();
+    final Map<String, dynamic> resolved = TableFormulaEvaluator.resolveRowValues(
+      schema: sourceSchema,
+      row: row,
+      allSchemas: allSchemas,
+      rowsByTableId: rowsByTableId,
+    );
+    final String keyStr =
+        (resolved[cfg.groupByColumnId] ?? row.values[cfg.groupByColumnId] ?? '')
+            .toString()
+            .trim();
     if (keyStr.isEmpty) {
       continue;
     }
     final double addend =
-        double.tryParse(row.values[cfg.aggregateSourceColumnId]?.toString().trim() ?? '') ?? 0;
+        double.tryParse(
+          (resolved[cfg.aggregateSourceColumnId] ??
+                  row.values[cfg.aggregateSourceColumnId] ??
+                  '')
+              .toString()
+              .trim(),
+        ) ??
+        0;
     sums[keyStr] = (sums[keyStr] ?? 0) + addend;
   }
   final List<String> keys = sums.keys.toList()..sort();
@@ -113,7 +154,7 @@ List<TableRowEntity> _computeLegacySummaryRows({
 
 String _resolveColumnValue({
   required SummaryColumnConfig config,
-  required List<TableRowEntity> groupRows,
+  required List<_ResolvedSeedRow> groupRows,
   required Map<String, List<TableRowEntity>> rowsByTableId,
 }) {
   if (groupRows.isEmpty) {
@@ -126,8 +167,8 @@ String _resolveColumnValue({
   switch (config.valueMode) {
     case SummaryValueMode.groupedValue:
     case SummaryValueMode.uniqueValue:
-      for (final TableRowEntity row in groupRows) {
-        final String v = (row.values[sourceColumnId] ?? '').toString();
+      for (final _ResolvedSeedRow row in groupRows) {
+        final String v = _resolvedCellValue(row, sourceColumnId);
         if (v.trim().isNotEmpty) {
           return v;
         }
@@ -146,12 +187,15 @@ String _resolveColumnValue({
 }
 
 String _aggregate({
-  required List<TableRowEntity> rows,
+  required List<_ResolvedSeedRow> rows,
   required String sourceColumnId,
   required SummaryAggregationOperation operation,
 }) {
   final List<double> numbers = rows
-      .map((TableRowEntity row) => double.tryParse((row.values[sourceColumnId] ?? '').toString()) ?? 0)
+      .map(
+        (_ResolvedSeedRow row) =>
+            double.tryParse(_resolvedCellValue(row, sourceColumnId).trim()) ?? 0,
+      )
       .toList(growable: false);
   if (operation == SummaryAggregationOperation.count) {
     return rows.length.toString();
@@ -179,4 +223,28 @@ String _formatTotal(double v) {
     return v.round().toString();
   }
   return v.toString();
+}
+
+TableSchemaEntity? _schemaById(List<TableSchemaEntity> schemas, String id) {
+  for (final TableSchemaEntity schema in schemas) {
+    if (schema.id == id) {
+      return schema;
+    }
+  }
+  return null;
+}
+
+String _resolvedCellValue(_ResolvedSeedRow row, String? sourceColumnId) {
+  if (sourceColumnId == null || sourceColumnId.isEmpty) {
+    return '';
+  }
+  return (row.resolved[sourceColumnId] ?? row.row.values[sourceColumnId] ?? '')
+      .toString();
+}
+
+class _ResolvedSeedRow {
+  const _ResolvedSeedRow({required this.row, required this.resolved});
+
+  final TableRowEntity row;
+  final Map<String, dynamic> resolved;
 }

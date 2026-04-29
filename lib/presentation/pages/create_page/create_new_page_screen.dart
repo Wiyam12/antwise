@@ -180,6 +180,12 @@ class CreateNewPageScreen extends GetView<CreateNewPageController> {
                             if (p.isDeleted) {
                               return false;
                             }
+                            if (p.isDrawerParentContainer) {
+                              return false;
+                            }
+                            if (p.showInBottomNav) {
+                              return true;
+                            }
                             // Only allow depth-1 pages:
                             // - page must be a child itself
                             // - its parent must be a top-level/root page
