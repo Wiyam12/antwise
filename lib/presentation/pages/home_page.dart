@@ -5,6 +5,7 @@ import 'package:antwise/core/widgets/app_loading.dart';
 import 'package:antwise/domain/entities/builder_page_entity.dart';
 import 'package:antwise/domain/entities/drawer_nav_layout_type.dart';
 import 'package:antwise/presentation/controllers/home_controller.dart';
+import 'package:antwise/presentation/routes/app_routes.dart';
 import 'package:antwise/presentation/widgets/bottom_nav/builder_bottom_nav_bar.dart';
 import 'package:antwise/presentation/widgets/dynamic_builder_page_body.dart';
 import 'package:flutter/material.dart';
@@ -26,17 +27,31 @@ class HomePage extends GetView<HomeController> {
       controller.bottomNavCenterPageId.value;
       controller.bottomNavShowLabels.value;
       controller.drawerNavLayout.value;
+      controller.accountNames.length;
+      final bool isSetupMode = controller.shouldShowSetupMode;
+      final bool hasExistingAccounts = controller.accountNames.isNotEmpty;
       if (controller.isLoading.value) {
         return Scaffold(
-          appBar: _buildAppBar(context, showCreateAction: true),
+          appBar: _buildAppBar(
+            context,
+            showCreateAction: true,
+            isSetupMode: isSetupMode,
+            hasExistingAccounts: hasExistingAccounts,
+          ),
           body: const Center(child: AppLoading()),
         );
       }
-      if (controller.shouldShowSetupMode) {
+      if (isSetupMode) {
         return Scaffold(
-          appBar: _buildAppBar(context, showCreateAction: false),
+          appBar: _buildAppBar(
+            context,
+            showCreateAction: false,
+            isSetupMode: true,
+            hasExistingAccounts: hasExistingAccounts,
+          ),
           body: _SetupModeBody(
             isApplyingTemplate: controller.isApplyingSetupTemplate.value,
+            onIsAccountNameUnique: controller.isAccountNameUnique,
             onSelectSimplePos: controller.applySimplePosTemplate,
             onSelectAdvance: controller.chooseAdvanceMode,
           ),
@@ -44,7 +59,12 @@ class HomePage extends GetView<HomeController> {
       }
       if (!controller.hasPages) {
         return Scaffold(
-          appBar: _buildAppBar(context, showCreateAction: true),
+          appBar: _buildAppBar(
+            context,
+            showCreateAction: true,
+            isSetupMode: false,
+            hasExistingAccounts: hasExistingAccounts,
+          ),
           body: _EmptyBuilderBody(onCreate: controller.openCreateHub),
         );
       }
@@ -55,7 +75,11 @@ class HomePage extends GetView<HomeController> {
   PreferredSizeWidget _buildAppBar(
     BuildContext context, {
     required bool showCreateAction,
+    required bool isSetupMode,
+    required bool hasExistingAccounts,
   }) {
+    final bool showSwitchAccountAction = hasExistingAccounts;
+    final bool showSettingsAction = !isSetupMode && hasExistingAccounts;
     return AppBar(
       title: const Text(AppConstants.appName),
       actions: <Widget>[
@@ -65,13 +89,140 @@ class HomePage extends GetView<HomeController> {
             tooltip: 'Create',
             onPressed: controller.openCreateHub,
           ),
-        IconButton(
-          icon: const Icon(Icons.settings_outlined),
-          tooltip: 'Settings',
-          onPressed: controller.openSettings,
-        ),
+        if (showSwitchAccountAction)
+          IconButton(
+            icon: const Icon(Icons.swap_horiz),
+            tooltip: 'Switch Account',
+            onPressed: () => _openAccountSelector(context),
+          ),
+        if (showSettingsAction)
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: controller.openSettings,
+          ),
         const SizedBox(width: 4),
       ],
+    );
+  }
+
+  Future<void> _openAccountSelector(BuildContext context) async {
+    final ThemeData theme = Theme.of(context);
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext dialogContext) {
+        return Stack(
+          children: <Widget>[
+            Positioned(
+              top:
+                  kToolbarHeight + MediaQuery.of(dialogContext).padding.top + 8,
+              right: 12,
+              child: Material(
+                color: Colors.transparent,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 320),
+                  child: Card(
+                    elevation: 10,
+                    margin: EdgeInsets.zero,
+                    child: SizedBox(
+                      width: 320,
+                      height: 360,
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              child: Text(
+                                'Accounts',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Expanded(
+                              child: Obx(
+                                () => ListView.separated(
+                                  itemCount: controller.accountNames.length,
+                                  separatorBuilder:
+                                      (_, __) => const SizedBox(height: 8),
+                                  itemBuilder: (_, int index) {
+                                    final String accountName =
+                                        controller.accountNames[index];
+                                    final bool isActive =
+                                        accountName ==
+                                        controller.activeAccountName.value;
+                                    return _accountCard(
+                                      icon: Icons.business_outlined,
+                                      title: accountName,
+                                      isActive: isActive,
+                                      onTap: () async {
+                                        if (dialogContext.mounted) {
+                                          Navigator.of(dialogContext).pop();
+                                        }
+                                        await controller.switchAccount(
+                                          accountName,
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            _accountCard(
+                              icon: Icons.add_circle_outline,
+                              title: 'Create New Account',
+                              isActive: false,
+                              leadingPrefix: '+ ',
+                              onTap: () {
+                                Navigator.of(dialogContext).pop();
+                                Get.offAllNamed<void>(
+                                  AppRoutes.home,
+                                  arguments: <String, dynamic>{
+                                    'forceSetupMode': true,
+                                  },
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _accountCard({
+    required IconData icon,
+    required String title,
+    required bool isActive,
+    required VoidCallback onTap,
+    String leadingPrefix = '',
+  }) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: ListTile(
+        onTap: onTap,
+        leading: Icon(icon),
+        title: Text('$leadingPrefix$title'),
+        trailing:
+            isActive
+                ? const Icon(Icons.check_circle, color: Colors.green)
+                : const Icon(Icons.chevron_right),
+      ),
     );
   }
 }
@@ -123,18 +274,21 @@ class _EmptyBuilderBody extends StatelessWidget {
 class _SetupModeBody extends StatelessWidget {
   const _SetupModeBody({
     required this.isApplyingTemplate,
+    required this.onIsAccountNameUnique,
     required this.onSelectSimplePos,
     required this.onSelectAdvance,
   });
 
   final bool isApplyingTemplate;
-  final Future<void> Function() onSelectSimplePos;
-  final Future<void> Function() onSelectAdvance;
+  final bool Function(String accountName) onIsAccountNameUnique;
+  final Future<void> Function({required String accountName}) onSelectSimplePos;
+  final Future<void> Function({required String accountName}) onSelectAdvance;
 
   @override
   Widget build(BuildContext context) {
     return _SetupModeSelector(
       isApplyingTemplate: isApplyingTemplate,
+      onIsAccountNameUnique: onIsAccountNameUnique,
       onSelectSimplePos: onSelectSimplePos,
       onSelectAdvance: onSelectAdvance,
     );
@@ -146,13 +300,15 @@ enum _SetupModeChoice { simplePos, advance }
 class _SetupModeSelector extends StatefulWidget {
   const _SetupModeSelector({
     required this.isApplyingTemplate,
+    required this.onIsAccountNameUnique,
     required this.onSelectSimplePos,
     required this.onSelectAdvance,
   });
 
   final bool isApplyingTemplate;
-  final Future<void> Function() onSelectSimplePos;
-  final Future<void> Function() onSelectAdvance;
+  final bool Function(String accountName) onIsAccountNameUnique;
+  final Future<void> Function({required String accountName}) onSelectSimplePos;
+  final Future<void> Function({required String accountName}) onSelectAdvance;
 
   @override
   State<_SetupModeSelector> createState() => _SetupModeSelectorState();
@@ -160,16 +316,47 @@ class _SetupModeSelector extends StatefulWidget {
 
 class _SetupModeSelectorState extends State<_SetupModeSelector> {
   _SetupModeChoice? _selected;
+  final TextEditingController _accountNameController = TextEditingController();
+  String? _accountNameError;
+
+  bool get _isAccountNameValid =>
+      _accountNameError == null &&
+      _accountNameController.text.trim().isNotEmpty;
 
   Future<void> _proceed() async {
-    if (_selected == null || widget.isApplyingTemplate) {
+    final String accountName = _accountNameController.text.trim();
+    _validateAccountName(accountName);
+    if (_selected == null ||
+        widget.isApplyingTemplate ||
+        !_isAccountNameValid) {
       return;
     }
     if (_selected == _SetupModeChoice.simplePos) {
-      await widget.onSelectSimplePos();
+      await widget.onSelectSimplePos(accountName: accountName);
       return;
     }
-    await widget.onSelectAdvance();
+    await widget.onSelectAdvance(accountName: accountName);
+  }
+
+  @override
+  void dispose() {
+    _accountNameController.dispose();
+    super.dispose();
+  }
+
+  void _validateAccountName(String value) {
+    final String trimmed = value.trim();
+    String? error;
+    if (trimmed.isEmpty) {
+      error = 'Account name is required';
+    } else if (!widget.onIsAccountNameUnique(trimmed)) {
+      error = 'Account name already exists';
+    }
+    if (mounted) {
+      setState(() {
+        _accountNameError = error;
+      });
+    }
   }
 
   @override
@@ -184,6 +371,19 @@ class _SetupModeSelectorState extends State<_SetupModeSelector> {
             'Choose a Setup Mode',
             style: theme.textTheme.headlineSmall,
             textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _accountNameController,
+            enabled: !widget.isApplyingTemplate,
+            textInputAction: TextInputAction.done,
+            decoration: InputDecoration(
+              labelText: 'Account Name',
+              hintText: 'POS System',
+              errorText: _accountNameError,
+              border: const OutlineInputBorder(),
+            ),
+            onChanged: _validateAccountName,
           ),
           const SizedBox(height: 12),
           Expanded(
@@ -236,7 +436,9 @@ class _SetupModeSelectorState extends State<_SetupModeSelector> {
             height: 50,
             child: FilledButton(
               onPressed:
-                  (_selected == null || widget.isApplyingTemplate)
+                  (_selected == null ||
+                          widget.isApplyingTemplate ||
+                          !_isAccountNameValid)
                       ? null
                       : _proceed,
               child: const Text('Proceed'),
@@ -345,6 +547,7 @@ class _BuilderShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final BuilderPageEntity? page = controller.selectedPage;
+    final bool hasExistingAccounts = controller.accountNames.isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(
@@ -358,11 +561,18 @@ class _BuilderShell extends StatelessWidget {
             tooltip: 'Create',
             onPressed: controller.openCreateHub,
           ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Settings',
-            onPressed: controller.openSettings,
-          ),
+          if (hasExistingAccounts)
+            IconButton(
+              icon: const Icon(Icons.swap_horiz),
+              tooltip: 'Switch Account',
+              onPressed: controller.openAccountSwitcher,
+            ),
+          if (hasExistingAccounts)
+            IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: 'Settings',
+              onPressed: controller.openSettings,
+            ),
           const SizedBox(width: 4),
         ],
       ),

@@ -5,6 +5,7 @@ import 'package:antwise/core/services/logger_service.dart';
 import 'package:antwise/core/storage/hive_boxes.dart';
 import 'package:antwise/data/models/hive/builder_page_hive_model.dart';
 import 'package:antwise/data/models/hive/builder_widget_hive_model.dart';
+import 'package:antwise/data/models/hive/navigation_config_hive_model.dart';
 import 'package:antwise/data/models/hive/table_schema_hive_model.dart';
 import 'package:antwise/domain/usecases/check_resources_downloaded_usecase.dart';
 import 'package:antwise/presentation/routes/app_routes.dart';
@@ -122,18 +123,16 @@ class SplashController extends GetxController {
             'swipeToDelete': schema.swipeToDelete,
             'productDisplayMode': schema.productDisplayMode,
             'tableKind': schema.tableKind,
+            'summaryConfig': _jsonSafe(schema.summaryConfig),
+            'inventoryDeduction': _jsonSafe(schema.inventoryDeduction),
+            'affectingTables': _jsonSafe(schema.affectingTables),
+            'validationRules': _jsonSafe(schema.validationRules),
             'searchEnabled': schema.searchEnabled,
             'dataLoadingMode': schema.dataLoadingMode,
             'pageSize': schema.pageSize,
             'lazyInitialLoad': schema.lazyInitialLoad,
             'columns': schema.columns
-                .map(
-                  (Map<String, dynamic> col) => <String, dynamic>{
-                    'id': col['id']?.toString(),
-                    'name': col['name']?.toString(),
-                    'type': col['type']?.toString(),
-                  },
-                )
+                .map((Map<String, dynamic> col) => _jsonSafe(col))
                 .toList(growable: false),
           };
         }),
@@ -156,8 +155,44 @@ class SplashController extends GetxController {
       );
     }
 
+    final Map<String, dynamic> navigation = <String, dynamic>{};
+    if (Hive.isBoxOpen(HiveBoxes.navigationBox)) {
+      final Box<NavigationConfigHiveModel> box =
+          Hive.box<NavigationConfigHiveModel>(HiveBoxes.navigationBox);
+      if (box.isNotEmpty) {
+        final NavigationConfigHiveModel first = box.values.first;
+        navigation.addAll(<String, dynamic>{
+          'bottomPageIds': first.bottomPageIds,
+          'drawerPageIds': first.drawerPageIds,
+          'activePageId': first.activePageId,
+          'mainPageId': first.mainPageId,
+          'bottomNavLayout': first.bottomNavLayout,
+          'bottomNavCenterPageId': first.bottomNavCenterPageId,
+          'bottomNavShowLabels': first.bottomNavShowLabels,
+          'drawerNavLayout': first.drawerNavLayout,
+          // Additional grouped metadata for richer restore while staying compatible.
+          'bottomNav': <String, dynamic>{
+            'layoutType': first.bottomNavLayout,
+            'layoutOptionId': first.bottomNavLayout,
+            'centerPageId': first.bottomNavCenterPageId,
+            'showLabels': first.bottomNavShowLabels,
+            'displayConfig': <String, dynamic>{
+              'showLabels': first.bottomNavShowLabels,
+              'centerPageId': first.bottomNavCenterPageId,
+            },
+          },
+          'drawerNav': <String, dynamic>{
+            'layoutType': first.drawerNavLayout,
+            'layoutOptionId': first.drawerNavLayout,
+            'displayConfig': <String, dynamic>{},
+          },
+        });
+      }
+    }
+
     final Map<String, dynamic> snapshot = <String, dynamic>{
       'event': 'startup_snapshot',
+      'schemaVersion': 2,
       'counts': <String, dynamic>{
         'pages': pages.length,
         'tables': tables.length,
@@ -166,6 +201,7 @@ class SplashController extends GetxController {
       'pages': pages,
       'tables': tables,
       'widgets': widgets,
+      'navigation': navigation,
     };
 
     final Directory directory = await getApplicationDocumentsDirectory();

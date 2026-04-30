@@ -33,6 +33,8 @@ void main() {
             themeMode: 'system',
             firstInstallCompleted: false,
             themePresetName: 'Ocean Blue',
+            accountNames: const <String>[],
+            activeAccountName: '',
           ),
         );
 

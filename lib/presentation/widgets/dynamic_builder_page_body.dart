@@ -380,7 +380,7 @@ class TableLayoutOptionPreview extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             SizedBox.square(
-              dimension: 70,
+              dimension: 64,
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: theme.colorScheme.primaryContainer,
@@ -2747,58 +2747,61 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
     }
 
     final double chartHeight = compact ? 160 : 220;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            if (title.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall,
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(0.9)),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (title.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall,
+                  ),
                 ),
+              if (canUseDateGrouping) ...<Widget>[
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: enabledDateFilters
+                      .map((_ChartDateGrouping grouping) {
+                        return ChoiceChip(
+                          label: Text(_dateGroupingLabel(grouping)),
+                          selected: activeDateGrouping == grouping,
+                          onSelected: (bool selected) {
+                            if (!selected) {
+                              return;
+                            }
+                            setState(() {
+                              _selectedDateGroupingByChartId[chartWidget.id] =
+                                  grouping;
+                            });
+                          },
+                        );
+                      })
+                      .toList(growable: false),
+                ),
+                const SizedBox(height: 10),
+              ],
+              SizedBox(
+                height: chartHeight,
+                child: switch (chartType) {
+                  'line' => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: _buildLineChart(points, theme),
+                  ),
+                  'pie' => _buildPieChart(points, theme, chartWidget.id),
+                  _ => _buildBarChart(points, theme),
+                },
               ),
-            if (canUseDateGrouping) ...<Widget>[
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: enabledDateFilters
-                    .map((_ChartDateGrouping grouping) {
-                      return ChoiceChip(
-                        label: Text(_dateGroupingLabel(grouping)),
-                        selected: activeDateGrouping == grouping,
-                        onSelected: (bool selected) {
-                          if (!selected) {
-                            return;
-                          }
-                          setState(() {
-                            _selectedDateGroupingByChartId[chartWidget.id] =
-                                grouping;
-                          });
-                        },
-                      );
-                    })
-                    .toList(growable: false),
-              ),
-              const SizedBox(height: 10),
             ],
-            SizedBox(
-              height: chartHeight,
-              child: switch (chartType) {
-                'line' => Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: _buildLineChart(points, theme),
-                ),
-                'pie' => _buildPieChart(points, theme, chartWidget.id),
-                _ => _buildBarChart(points, theme),
-              },
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -3333,64 +3336,67 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
     );
     final double maxY =
         maxPoint <= 0 ? 1 : (maxPoint * 1.1).clamp(1, double.infinity);
-    return LineChart(
-      LineChartData(
-        minY: 0,
-        maxY: maxY,
-        borderData: FlBorderData(show: false),
-        gridData: const FlGridData(show: true),
-        lineTouchData: LineTouchData(
-          enabled: true,
-          touchTooltipData: LineTouchTooltipData(
-            getTooltipItems: (List<LineBarSpot> touchedSpots) {
-              return touchedSpots
-                  .map((LineBarSpot spot) {
-                    final int idx = spot.x.toInt();
-                    final String label =
-                        idx >= 0 && idx < points.length
-                            ? points[idx].label
-                            : '';
-                    return LineTooltipItem(
-                      '$label\n${spot.y.toStringAsFixed(2)}',
-                      const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    );
-                  })
-                  .toList(growable: false);
-            },
-          ),
-        ),
-        titlesData: FlTitlesData(
-          rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          topTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          leftTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: true, reservedSize: 34),
-          ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: rotateLabels ? 44 : 28,
-              interval: xInterval,
-              getTitlesWidget: (double value, TitleMeta meta) {
-                final int idx = value.toInt();
-                final String label =
-                    idx >= 0 && idx < points.length ? points[idx].label : '';
-                return _chartBottomTitle(
-                  label,
-                  meta: meta,
-                  rotate: rotateLabels,
-                );
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(0.8)),
+      child: LineChart(
+        LineChartData(
+          minY: 0,
+          maxY: maxY,
+          borderData: FlBorderData(show: false),
+          gridData: const FlGridData(show: true),
+          lineTouchData: LineTouchData(
+            enabled: true,
+            touchTooltipData: LineTouchTooltipData(
+              getTooltipItems: (List<LineBarSpot> touchedSpots) {
+                return touchedSpots
+                    .map((LineBarSpot spot) {
+                      final int idx = spot.x.toInt();
+                      final String label =
+                          idx >= 0 && idx < points.length
+                              ? points[idx].label
+                              : '';
+                      return LineTooltipItem(
+                        '$label\n${spot.y.toStringAsFixed(2)}',
+                        const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      );
+                    })
+                    .toList(growable: false);
               },
             ),
           ),
+          titlesData: FlTitlesData(
+            rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            leftTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: true, reservedSize: 34),
+            ),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: rotateLabels ? 44 : 28,
+                interval: xInterval,
+                getTitlesWidget: (double value, TitleMeta meta) {
+                  final int idx = value.toInt();
+                  final String label =
+                      idx >= 0 && idx < points.length ? points[idx].label : '';
+                  return _chartBottomTitle(
+                    label,
+                    meta: meta,
+                    rotate: rotateLabels,
+                  );
+                },
+              ),
+            ),
+          ),
+          lineBarsData: _buildLineSegments(points, theme),
         ),
-        lineBarsData: _buildLineSegments(points, theme),
       ),
     );
   }

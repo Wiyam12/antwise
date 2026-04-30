@@ -76,6 +76,9 @@ class AppThemeController extends GetxController {
         },
         firstInstallCompleted: old?.firstInstallCompleted ?? false,
         themePresetName: selectedPresetName.value,
+        accountNames: old?.accountNames ?? const <String>[],
+        activeAccountName: old?.activeAccountName ?? '',
+        accountWorkspaces: old?.accountWorkspaces ?? <String, dynamic>{},
       ),
     );
   }
