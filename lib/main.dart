@@ -1,4 +1,6 @@
 import 'package:antwise/core/constants/app_constants.dart';
+import 'package:antwise/core/services/notification_dispatcher_service.dart';
+import 'package:antwise/core/services/notification_runtime_service.dart';
 import 'package:antwise/core/storage/hive_service.dart';
 import 'package:antwise/core/theme/app_theme.dart';
 import 'package:antwise/core/theme/app_theme_controller.dart';
@@ -21,6 +23,10 @@ Future<void> main() async {
   Get.put<HiveService>(hiveService, permanent: true);
   Get.put<SharedPreferences>(prefs, permanent: true);
   Get.put<AppThemeController>(themeController, permanent: true);
+  NotificationDispatcherService.instance.initialize();
+  await NotificationRuntimeService.ensureInitialized();
+  await NotificationRuntimeService.setupBackgroundChecks();
+  await NotificationRuntimeService.evaluateRulesAndNotify();
   runApp(const MyApp());
 }
 

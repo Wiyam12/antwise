@@ -78,7 +78,7 @@ class HomePage extends GetView<HomeController> {
     required bool isSetupMode,
     required bool hasExistingAccounts,
   }) {
-    final bool showSwitchAccountAction = hasExistingAccounts;
+    final bool showSwitchAccountAction = isSetupMode && hasExistingAccounts;
     final bool showSettingsAction = !isSetupMode && hasExistingAccounts;
     return AppBar(
       title: const Text(AppConstants.appName),
@@ -561,7 +561,8 @@ class _BuilderShell extends StatelessWidget {
             tooltip: 'Create',
             onPressed: controller.openCreateHub,
           ),
-          if (hasExistingAccounts)
+
+          if (controller.shouldShowSetupMode && hasExistingAccounts)
             IconButton(
               icon: const Icon(Icons.swap_horiz),
               tooltip: 'Switch Account',

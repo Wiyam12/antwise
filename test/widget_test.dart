@@ -35,6 +35,7 @@ void main() {
             themePresetName: 'Ocean Blue',
             accountNames: const <String>[],
             activeAccountName: '',
+            accountWorkspaces: const <String, dynamic>{},
           ),
         );
 

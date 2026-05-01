@@ -23,4 +23,7 @@ abstract final class AppRoutes {
   static const String settingsEditTable = '/settings/tables/edit';
   static const String settingsWidgets = '/settings/widgets';
   static const String settingsEditWidget = '/settings/widgets/edit';
+  static const String settingsNotifications = '/settings/notifications';
+  static const String settingsNotificationRule =
+      '/settings/notifications/rule';
 }

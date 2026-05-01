@@ -19,6 +19,7 @@ import 'package:antwise/presentation/pages/settings/edit_table_screen.dart';
 import 'package:antwise/presentation/pages/settings/settings_page_layout_edit_page.dart';
 import 'package:antwise/presentation/pages/settings/settings_page_layouts_page.dart';
 import 'package:antwise/presentation/pages/settings/settings_page.dart';
+import 'package:antwise/presentation/pages/settings/settings_notifications_page.dart';
 import 'package:antwise/presentation/pages/settings/settings_widget_edit_page.dart';
 import 'package:antwise/presentation/pages/settings/settings_tables_page.dart';
 import 'package:antwise/presentation/pages/settings/settings_widgets_page.dart';
@@ -119,6 +120,16 @@ class AppPages {
     GetPage<dynamic>(
       name: AppRoutes.settingsEditWidget,
       page: SettingsWidgetEditPage.new,
+      binding: SettingsBinding(),
+    ),
+    GetPage<dynamic>(
+      name: AppRoutes.settingsNotifications,
+      page: SettingsNotificationsPage.new,
+      binding: SettingsBinding(),
+    ),
+    GetPage<dynamic>(
+      name: AppRoutes.settingsNotificationRule,
+      page: SettingsNotificationRulePage.new,
       binding: SettingsBinding(),
     ),
   ];

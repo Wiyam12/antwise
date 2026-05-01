@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:antwise/core/app_snackbar.dart';
+import 'package:antwise/core/services/notification_runtime_service.dart';
 import 'package:antwise/core/icons/app_icon_registry.dart';
 import 'package:antwise/domain/entities/builder_page_entity.dart';
 import 'package:antwise/domain/entities/builder_widget_entity.dart';
@@ -1877,6 +1878,19 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
     );
     if (existing == null) {
       await _saveRow(row);
+      try {
+        final int triggeredCount =
+            await NotificationRuntimeService.evaluateRulesForRowChange(
+              tableId: row.tableId,
+              rowId: row.id,
+            );
+        if (triggeredCount > 0) {
+          // showAppSnackbar('Notification', 'Triggered $triggeredCount alert(s)');
+          print('Triggered $triggeredCount alert(s)');
+        }
+      } catch (_) {
+        /* best-effort; row is already saved */
+      }
       if (schema.tableKind != TableKind.summary) {
         try {
           await _applyAffectingTables(
@@ -1901,6 +1915,19 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       showAppSnackbar('${schema.name} Table', 'Data added');
     } else {
       await _updateRow(row);
+      try {
+        final int triggeredCount =
+            await NotificationRuntimeService.evaluateRulesForRowChange(
+              tableId: row.tableId,
+              rowId: row.id,
+            );
+        if (triggeredCount > 0) {
+          // showAppSnackbar('Notification', 'Triggered $triggeredCount alert(s)');
+          print('Triggered $triggeredCount alert(s)');
+        }
+      } catch (_) {
+        /* best-effort; row is already updated */
+      }
       if (schema.tableKind != TableKind.summary) {
         try {
           await _applyAffectingTables(
@@ -2317,154 +2344,159 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
             heroImagePath.isNotEmpty && File(heroImagePath).existsSync()
                 ? File(heroImagePath)
                 : null;
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: Container(
-            constraints: BoxConstraints(minHeight: compact ? 130 : 160),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: <Color>[
-                  baseColor,
-                  Color.lerp(baseColor, Colors.black, 0.28) ?? baseColor,
-                ],
-              ),
-              image:
-                  backgroundFile != null
-                      ? DecorationImage(
-                        image: FileImage(backgroundFile),
-                        fit: BoxFit.cover,
-                        opacity: 0.42,
-                      )
-                      : null,
-            ),
-            child: LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints constraints) {
-                final double width = constraints.maxWidth;
-                final bool veryNarrow = width <= 175;
-                final bool narrow = width <= 230;
-                final double bubbleScale =
-                    veryNarrow ? 0.5 : (narrow || compact ? 0.7 : 1.0);
-                final double contentPadding =
-                    veryNarrow ? 10 : (narrow ? 12 : 18);
-                final TextStyle? titleStyle = (veryNarrow
-                        ? theme.textTheme.titleMedium
-                        : narrow
-                        ? theme.textTheme.titleLarge
-                        : theme.textTheme.headlineSmall)
-                    ?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    );
-                final TextStyle? labelStyle = (veryNarrow
-                        ? theme.textTheme.bodySmall
-                        : narrow
-                        ? theme.textTheme.bodyMedium
-                        : theme.textTheme.titleMedium)
-                    ?.copyWith(color: Colors.white.withValues(alpha: 0.85));
-                final TextStyle? valueStyle = (veryNarrow
-                        ? theme.textTheme.titleMedium
-                        : narrow || compact
-                        ? theme.textTheme.headlineSmall
-                        : theme.textTheme.displaySmall)
-                    ?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w500,
-                    );
-                final TextStyle? prefixStyle = (veryNarrow
-                        ? theme.textTheme.titleSmall
-                        : theme.textTheme.headlineMedium)
-                    ?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    );
-
-                return Stack(
-                  children: <Widget>[
-                    Positioned(
-                      right: -20 * bubbleScale,
-                      top: 30 * bubbleScale,
-                      child: _heroBubble(
-                        90 * bubbleScale,
-                        Colors.pinkAccent.withValues(alpha: 0.9),
-                      ),
-                    ),
-                    Positioned(
-                      left: 140 * bubbleScale,
-                      top: 8 * bubbleScale,
-                      child: _heroBubble(
-                        110 * bubbleScale,
-                        Colors.white.withValues(alpha: 0.16),
-                      ),
-                    ),
-                    Positioned(
-                      left: 65 * bubbleScale,
-                      top: 28 * bubbleScale,
-                      child: _heroBubble(
-                        140 * bubbleScale,
-                        Colors.black.withValues(alpha: 0.12),
-                      ),
-                    ),
-                    Positioned(
-                      left: 24 * bubbleScale,
-                      bottom: -50 * bubbleScale,
-                      child: _heroBubble(
-                        180 * bubbleScale,
-                        Colors.white.withValues(alpha: 0.1),
-                      ),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.all(contentPadding),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: <Widget>[
-                          Text(
-                            heroName.isEmpty ? 'Card' : heroName,
-                            maxLines: veryNarrow ? 2 : 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: titleStyle,
-                          ),
-                          SizedBox(height: veryNarrow ? 4 : 8),
-                          Text(
-                            heroLabel.isEmpty ? 'Balance' : heroLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: labelStyle,
-                          ),
-                          const SizedBox(height: 2),
-                          Row(
-                            children: <Widget>[
-                              if (heroPrefixType == 'text' &&
-                                  heroPrefixText.isNotEmpty)
-                                Text(heroPrefixText, style: prefixStyle),
-                              if (heroPrefixType == 'icon' &&
-                                  heroPrefixIconKey != null &&
-                                  heroPrefixIconKey.isNotEmpty) ...<Widget>[
-                                Icon(
-                                  AppIconRegistry.iconOf(heroPrefixIconKey),
-                                  color: Colors.white,
-                                  size: veryNarrow ? 18 : 24,
-                                ),
-                                const SizedBox(width: 6),
-                              ],
-                              Expanded(
-                                child: Text(
-                                  heroValue.isEmpty ? '—' : heroValue,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: valueStyle,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
+        return MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: TextScaler.linear(0.8)),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: Container(
+              constraints: BoxConstraints(minHeight: compact ? 130 : 160),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: <Color>[
+                    baseColor,
+                    Color.lerp(baseColor, Colors.black, 0.28) ?? baseColor,
                   ],
-                );
-              },
+                ),
+                image:
+                    backgroundFile != null
+                        ? DecorationImage(
+                          image: FileImage(backgroundFile),
+                          fit: BoxFit.cover,
+                          opacity: 0.42,
+                        )
+                        : null,
+              ),
+              child: LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints constraints) {
+                  final double width = constraints.maxWidth;
+                  final bool veryNarrow = width <= 175;
+                  final bool narrow = width <= 230;
+                  final double bubbleScale =
+                      veryNarrow ? 0.5 : (narrow || compact ? 0.7 : 1.0);
+                  final double contentPadding =
+                      veryNarrow ? 10 : (narrow ? 12 : 18);
+                  final TextStyle? titleStyle = (veryNarrow
+                          ? theme.textTheme.titleMedium
+                          : narrow
+                          ? theme.textTheme.titleLarge
+                          : theme.textTheme.headlineSmall)
+                      ?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      );
+                  final TextStyle? labelStyle = (veryNarrow
+                          ? theme.textTheme.bodySmall
+                          : narrow
+                          ? theme.textTheme.bodyMedium
+                          : theme.textTheme.titleMedium)
+                      ?.copyWith(color: Colors.white.withValues(alpha: 0.85));
+                  final TextStyle? valueStyle = (veryNarrow
+                          ? theme.textTheme.titleMedium
+                          : narrow || compact
+                          ? theme.textTheme.headlineSmall
+                          : theme.textTheme.displaySmall)
+                      ?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
+                      );
+                  final TextStyle? prefixStyle = (veryNarrow
+                          ? theme.textTheme.titleSmall
+                          : theme.textTheme.headlineMedium)
+                      ?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      );
+
+                  return Stack(
+                    children: <Widget>[
+                      Positioned(
+                        right: -20 * bubbleScale,
+                        top: 30 * bubbleScale,
+                        child: _heroBubble(
+                          90 * bubbleScale,
+                          Colors.pinkAccent.withValues(alpha: 0.9),
+                        ),
+                      ),
+                      Positioned(
+                        left: 140 * bubbleScale,
+                        top: 8 * bubbleScale,
+                        child: _heroBubble(
+                          110 * bubbleScale,
+                          Colors.white.withValues(alpha: 0.16),
+                        ),
+                      ),
+                      Positioned(
+                        left: 65 * bubbleScale,
+                        top: 28 * bubbleScale,
+                        child: _heroBubble(
+                          140 * bubbleScale,
+                          Colors.black.withValues(alpha: 0.12),
+                        ),
+                      ),
+                      Positioned(
+                        left: 24 * bubbleScale,
+                        bottom: -50 * bubbleScale,
+                        child: _heroBubble(
+                          180 * bubbleScale,
+                          Colors.white.withValues(alpha: 0.1),
+                        ),
+                      ),
+                      Padding(
+                        padding: EdgeInsets.all(contentPadding),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: <Widget>[
+                            Text(
+                              heroName.isEmpty ? 'Card' : heroName,
+                              maxLines: veryNarrow ? 2 : 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: titleStyle,
+                            ),
+                            SizedBox(height: veryNarrow ? 4 : 8),
+                            Text(
+                              heroLabel.isEmpty ? 'Balance' : heroLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: labelStyle,
+                            ),
+                            const SizedBox(height: 2),
+                            Row(
+                              children: <Widget>[
+                                if (heroPrefixType == 'text' &&
+                                    heroPrefixText.isNotEmpty)
+                                  Text(heroPrefixText, style: prefixStyle),
+                                if (heroPrefixType == 'icon' &&
+                                    heroPrefixIconKey != null &&
+                                    heroPrefixIconKey.isNotEmpty) ...<Widget>[
+                                  Icon(
+                                    AppIconRegistry.iconOf(heroPrefixIconKey),
+                                    color: Colors.white,
+                                    size: veryNarrow ? 18 : 24,
+                                  ),
+                                  const SizedBox(width: 6),
+                                ],
+                                Expanded(
+                                  child: Text(
+                                    heroValue.isEmpty ? '—' : heroValue,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: valueStyle,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         );

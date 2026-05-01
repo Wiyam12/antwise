@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:antwise/core/storage/hive_boxes.dart';
 import 'package:antwise/data/models/hive/app_settings_hive_model.dart';
 import 'package:antwise/data/models/hive/builder_page_hive_model.dart';
@@ -72,7 +74,9 @@ class _SettingsPageState extends State<SettingsPage> {
     );
 
     if (currentAccountName.isNotEmpty) {
-      workspaces[currentAccountName] = _captureWorkspaceSnapshot();
+      workspaces[currentAccountName] = _captureWorkspaceSnapshot(
+        accountName: currentAccountName,
+      );
     }
     await _clearWorkspaceSnapshot();
     final Map<String, dynamic>? targetWorkspace = _asNullableStringMap(
@@ -81,7 +85,9 @@ class _SettingsPageState extends State<SettingsPage> {
     if (targetWorkspace != null) {
       await _restoreWorkspaceSnapshot(targetWorkspace);
     }
-    workspaces[accountName] = _captureWorkspaceSnapshot();
+    workspaces[accountName] = _captureWorkspaceSnapshot(
+      accountName: accountName,
+    );
 
     await box.put(
       _settingsKey,
@@ -224,6 +230,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final bool canDeleteActiveWorkspace = _activeAccountName.trim().isNotEmpty;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
@@ -286,9 +293,302 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: 'Widget settings and behavior',
             onTap: () => Get.toNamed<void>(AppRoutes.settingsWidgets),
           ),
+          const SizedBox(height: 10),
+          _settingsEntry(
+            context,
+            prefixIcon: Icons.notifications_outlined,
+            title: 'Notifications',
+            subtitle: 'Rule-based notification settings',
+            onTap: () => Get.toNamed<void>(AppRoutes.settingsNotifications),
+          ),
+          const SizedBox(height: 24),
+          Center(
+            child: Text(
+              'Danger Zone',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: Theme.of(context).colorScheme.error,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          // const SizedBox(height: 24),
+          Divider(
+            height: 1,
+            thickness: 1.4,
+            color: Theme.of(context).colorScheme.error.withValues(alpha: 0.8),
+          ),
+
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed:
+                  canDeleteActiveWorkspace
+                      ? _handleDeleteWorkspaceAccount
+                      : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError,
+              ),
+              icon: const Icon(Icons.delete_forever_outlined),
+              label: const Text('Delete this Workspace Account'),
+            ),
+          ),
+          if (!canDeleteActiveWorkspace)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'No active workspace account selected.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
         ],
       ),
     );
+  }
+
+  Future<void> _handleDeleteWorkspaceAccount() async {
+    final String targetAccountName = _activeAccountName.trim();
+    if (targetAccountName.isEmpty || !Hive.isBoxOpen(HiveBoxes.settingsBox)) {
+      return;
+    }
+    final Box<AppSettingsHiveModel> box = Hive.box<AppSettingsHiveModel>(
+      HiveBoxes.settingsBox,
+    );
+    final AppSettingsHiveModel? old = box.get(_settingsKey);
+    final Map<String, dynamic> workspaces = _asStringDynamicMap(
+      old?.accountWorkspaces,
+    );
+    workspaces[targetAccountName] = _captureWorkspaceSnapshot(
+      accountName: targetAccountName,
+    );
+    final Map<String, dynamic> targetWorkspace =
+        _asNullableStringMap(workspaces[targetAccountName]) ??
+        <String, dynamic>{};
+    final ({int pages, int tables, int widgets}) counts = _workspaceCounts(
+      targetWorkspace,
+    );
+
+    final bool firstConfirmed = await _showDeleteWorkspaceFirstConfirm(
+      accountName: targetAccountName,
+      pagesCount: counts.pages,
+      tablesCount: counts.tables,
+      widgetsCount: counts.widgets,
+    );
+    if (!firstConfirmed) {
+      return;
+    }
+    final bool secondConfirmed = await _showDeleteWorkspaceFinalConfirm();
+    if (!secondConfirmed) {
+      return;
+    }
+
+    final List<String> updatedAccountNames = <String>[
+      for (final String name in (old?.accountNames ?? _accountNames))
+        if (name.toLowerCase() != targetAccountName.toLowerCase()) name,
+    ];
+    workspaces.removeWhere(
+      (String key, dynamic _) =>
+          key.toLowerCase() == targetAccountName.toLowerCase(),
+    );
+
+    if (updatedAccountNames.isEmpty) {
+      await _clearWorkspaceSnapshot();
+      await box.put(
+        _settingsKey,
+        AppSettingsHiveModel(
+          resourcesDownloaded: old?.resourcesDownloaded ?? false,
+          themeMode: old?.themeMode ?? 'system',
+          firstInstallCompleted: false,
+          themePresetName: old?.themePresetName ?? 'Ocean Blue',
+          accountNames: const <String>[],
+          activeAccountName: '',
+          accountWorkspaces: <String, dynamic>{},
+        ),
+      );
+      if (mounted) {
+        setState(() {
+          _accountNames = <String>[];
+          _activeAccountName = '';
+        });
+      }
+      Get.offAllNamed<void>(
+        AppRoutes.home,
+        arguments: <String, dynamic>{'forceSetupMode': true},
+      );
+      return;
+    }
+
+    final String nextAccount = updatedAccountNames.first;
+    await _clearWorkspaceSnapshot();
+    final Map<String, dynamic>? nextWorkspace = _asNullableStringMap(
+      workspaces[nextAccount],
+    );
+    if (nextWorkspace != null) {
+      await _restoreWorkspaceSnapshot(nextWorkspace);
+    }
+    workspaces[nextAccount] = _captureWorkspaceSnapshot(
+      accountName: nextAccount,
+    );
+
+    await box.put(
+      _settingsKey,
+      AppSettingsHiveModel(
+        resourcesDownloaded: old?.resourcesDownloaded ?? false,
+        themeMode: old?.themeMode ?? 'system',
+        firstInstallCompleted: old?.firstInstallCompleted ?? true,
+        themePresetName: old?.themePresetName ?? 'Ocean Blue',
+        accountNames: updatedAccountNames,
+        activeAccountName: nextAccount,
+        accountWorkspaces: workspaces,
+      ),
+    );
+    if (mounted) {
+      setState(() {
+        _accountNames = updatedAccountNames;
+        _activeAccountName = nextAccount;
+      });
+    }
+    Get.offAllNamed<void>(AppRoutes.home);
+  }
+
+  ({int pages, int tables, int widgets}) _workspaceCounts(
+    Map<String, dynamic> snapshot,
+  ) {
+    final int pages = _asMapList(snapshot['pages']).length;
+    final int tables = _asMapList(snapshot['tables']).length;
+    final int widgets = _asMapList(snapshot['widgets']).length;
+    return (pages: pages, tables: tables, widgets: widgets);
+  }
+
+  Future<bool> _showDeleteWorkspaceFirstConfirm({
+    required String accountName,
+    required int pagesCount,
+    required int tablesCount,
+    required int widgetsCount,
+  }) async {
+    final bool? result = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        final ThemeData theme = Theme.of(dialogContext);
+        return AlertDialog(
+          title: const Text('Delete Workspace Account?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text('Account: $accountName'),
+              const SizedBox(height: 4),
+              Text('Pages: $pagesCount'),
+              Text('Tables: $tablesCount'),
+              Text('Widgets: $widgetsCount'),
+              const SizedBox(height: 12),
+              Text(
+                'Deleting this workspace will permanently remove all data.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.error,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: theme.colorScheme.error,
+                foregroundColor: theme.colorScheme.onError,
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Confirm'),
+            ),
+          ],
+        );
+      },
+    );
+    return result == true;
+  }
+
+  Future<bool> _showDeleteWorkspaceFinalConfirm() async {
+    final bool? result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        int secondsLeft = 10;
+        Timer? timer;
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setStateDialog) {
+            timer ??= Timer.periodic(const Duration(seconds: 1), (Timer t) {
+              if (!dialogContext.mounted) {
+                t.cancel();
+                return;
+              }
+              if (secondsLeft <= 0) {
+                t.cancel();
+                return;
+              }
+              setStateDialog(() {
+                secondsLeft--;
+              });
+            });
+            return AlertDialog(
+              title: const Text('Final Confirmation'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'This action is irreversible. All data will be permanently deleted.',
+                    style: Theme.of(
+                      dialogContext,
+                    ).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(dialogContext).colorScheme.error,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    secondsLeft > 0
+                        ? 'Please wait $secondsLeft seconds before confirming.'
+                        : 'You can now confirm deletion.',
+                  ),
+                ],
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () {
+                    timer?.cancel();
+                    Navigator.of(dialogContext).pop(false);
+                  },
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed:
+                      secondsLeft == 0
+                          ? () {
+                            timer?.cancel();
+                            Navigator.of(dialogContext).pop(true);
+                          }
+                          : null,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Theme.of(dialogContext).colorScheme.error,
+                    foregroundColor:
+                        Theme.of(dialogContext).colorScheme.onError,
+                  ),
+                  child: const Text('Confirm'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    return result == true;
   }
 
   Widget _settingsEntry(
@@ -331,7 +631,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Map<String, dynamic> _captureWorkspaceSnapshot() {
+  Map<String, dynamic> _captureWorkspaceSnapshot({String? accountName}) {
     final List<Map<String, dynamic>> pages = <Map<String, dynamic>>[];
     if (Hive.isBoxOpen(HiveBoxes.pagesBox)) {
       final Box<BuilderPageHiveModel> pagesBox = Hive.box<BuilderPageHiveModel>(
@@ -445,7 +745,32 @@ class _SettingsPageState extends State<SettingsPage> {
       'widgets': widgets,
       'rows': rows,
       'navigation': navigation,
+      'notifications': _notificationsForAccount(accountName),
     };
+  }
+
+  List<Map<String, dynamic>> _notificationsForAccount(String? accountName) {
+    if (!Hive.isBoxOpen(HiveBoxes.settingsBox)) {
+      return const <Map<String, dynamic>>[];
+    }
+    final Box<AppSettingsHiveModel> box = Hive.box<AppSettingsHiveModel>(
+      HiveBoxes.settingsBox,
+    );
+    final AppSettingsHiveModel? settings = box.get(_settingsKey);
+    final String targetAccount =
+        (accountName ?? settings?.activeAccountName ?? '').trim();
+    if (targetAccount.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+    final Map<String, dynamic> workspaces = _asStringDynamicMap(
+      settings?.accountWorkspaces,
+    );
+    final Map<String, dynamic> workspace = _asStringDynamicMap(
+      workspaces[targetAccount],
+    );
+    return _asMapList(workspace['notifications'])
+        .map((Map<String, dynamic> item) => Map<String, dynamic>.from(item))
+        .toList(growable: false);
   }
 
   Future<void> _restoreWorkspaceSnapshot(Map<String, dynamic> snapshot) async {

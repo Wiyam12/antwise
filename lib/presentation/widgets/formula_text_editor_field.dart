@@ -51,6 +51,7 @@ class _FormulaTextEditorFieldState extends State<FormulaTextEditorField> {
     'COUNTIF': 'COUNTIF(?, ?)',
     'IF': 'IF(?, ?, ?)',
     'LOOKUP': 'LOOKUP(?, ?, ?)',
+    'TODAY': 'TODAY()',
   };
 
   late final FocusNode _focus = FocusNode();

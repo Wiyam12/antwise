@@ -216,7 +216,9 @@ class HomeController extends GetxController {
     final Map<String, dynamic> workspaces =
         await _captureStoredWorkspacesWithActiveSnapshot();
     await _initializeEmptyWorkspace();
-    workspaces[accountName.trim()] = _captureWorkspaceSnapshot();
+    workspaces[accountName.trim()] = _captureWorkspaceSnapshot(
+      accountName: accountName.trim(),
+    );
     await _markSetupCompleted(
       accountName: accountName,
       accountWorkspaces: workspaces,
@@ -410,7 +412,9 @@ class HomeController extends GetxController {
 
       final Map<String, dynamic> workspaces =
           await _captureStoredWorkspacesWithActiveSnapshot();
-      workspaces[accountName.trim()] = _captureWorkspaceSnapshot();
+      workspaces[accountName.trim()] = _captureWorkspaceSnapshot(
+        accountName: accountName.trim(),
+      );
       await _markSetupCompleted(
         accountName: accountName,
         accountWorkspaces: workspaces,
@@ -586,7 +590,9 @@ class HomeController extends GetxController {
       old?.accountWorkspaces,
     );
     if (currentAccountName.isNotEmpty) {
-      workspaces[currentAccountName] = _captureWorkspaceSnapshot();
+      workspaces[currentAccountName] = _captureWorkspaceSnapshot(
+        accountName: currentAccountName,
+      );
     }
 
     await _initializeEmptyWorkspace();
@@ -596,7 +602,9 @@ class HomeController extends GetxController {
     if (targetWorkspace != null) {
       await _restoreWorkspaceSnapshot(targetWorkspace);
     }
-    workspaces[targetAccount] = _captureWorkspaceSnapshot();
+    workspaces[targetAccount] = _captureWorkspaceSnapshot(
+      accountName: targetAccount,
+    );
 
     await box.put(
       _settingsKey,
@@ -673,11 +681,14 @@ class HomeController extends GetxController {
       await Hive.box<TableRowHiveModel>(HiveBoxes.rowsBox).clear();
     }
     if (Hive.isBoxOpen(HiveBoxes.navigationBox)) {
-      await Hive.box<NavigationConfigHiveModel>(HiveBoxes.navigationBox).clear();
+      await Hive.box<NavigationConfigHiveModel>(
+        HiveBoxes.navigationBox,
+      ).clear();
     }
   }
 
-  Future<Map<String, dynamic>> _captureStoredWorkspacesWithActiveSnapshot() async {
+  Future<Map<String, dynamic>>
+  _captureStoredWorkspacesWithActiveSnapshot() async {
     if (!Hive.isBoxOpen(HiveBoxes.settingsBox)) {
       return <String, dynamic>{};
     }
@@ -690,12 +701,14 @@ class HomeController extends GetxController {
     );
     final String currentAccountName = settings?.activeAccountName.trim() ?? '';
     if (currentAccountName.isNotEmpty) {
-      workspaces[currentAccountName] = _captureWorkspaceSnapshot();
+      workspaces[currentAccountName] = _captureWorkspaceSnapshot(
+        accountName: currentAccountName,
+      );
     }
     return workspaces;
   }
 
-  Map<String, dynamic> _captureWorkspaceSnapshot() {
+  Map<String, dynamic> _captureWorkspaceSnapshot({String? accountName}) {
     final List<Map<String, dynamic>> pagesSnapshot = <Map<String, dynamic>>[];
     if (Hive.isBoxOpen(HiveBoxes.pagesBox)) {
       final Box<BuilderPageHiveModel> pagesBox = Hive.box<BuilderPageHiveModel>(
@@ -809,7 +822,32 @@ class HomeController extends GetxController {
       'widgets': widgetsSnapshot,
       'rows': rowsSnapshot,
       'navigation': navigationSnapshot,
+      'notifications': _notificationsForAccount(accountName),
     };
+  }
+
+  List<Map<String, dynamic>> _notificationsForAccount(String? accountName) {
+    if (!Hive.isBoxOpen(HiveBoxes.settingsBox)) {
+      return const <Map<String, dynamic>>[];
+    }
+    final Box<AppSettingsHiveModel> box = Hive.box<AppSettingsHiveModel>(
+      HiveBoxes.settingsBox,
+    );
+    final AppSettingsHiveModel? settings = box.get(_settingsKey);
+    final String targetAccount = (accountName ?? settings?.activeAccountName ?? '')
+        .trim();
+    if (targetAccount.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+    final Map<String, dynamic> workspaces = _asStringDynamicMap(
+      settings?.accountWorkspaces,
+    );
+    final Map<String, dynamic> workspace = _asStringDynamicMap(
+      workspaces[targetAccount],
+    );
+    return _asMapList(workspace['notifications'])
+        .map((Map<String, dynamic> item) => Map<String, dynamic>.from(item))
+        .toList(growable: false);
   }
 
   Future<void> _restoreWorkspaceSnapshot(Map<String, dynamic> snapshot) async {
@@ -923,7 +961,8 @@ class HomeController extends GetxController {
         mainPageId: navigationRaw['mainPageId']?.toString(),
         bottomNavLayout:
             (navigationRaw['bottomNavLayout'] ?? 'standard').toString(),
-        bottomNavCenterPageId: navigationRaw['bottomNavCenterPageId']?.toString(),
+        bottomNavCenterPageId:
+            navigationRaw['bottomNavCenterPageId']?.toString(),
         bottomNavShowLabels:
             navigationRaw['bottomNavShowLabels'] is bool
                 ? navigationRaw['bottomNavShowLabels'] as bool

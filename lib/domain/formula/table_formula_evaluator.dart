@@ -539,9 +539,22 @@ class _EvalParser {
         return _parseAggregate(_Agg.avg);
       case 'COUNTIF':
         return _parseCountIfArgs();
+      case 'TODAY':
+        return _parseTodayArgs();
       default:
         throw FormatException('fn');
     }
+  }
+
+  String _parseTodayArgs() {
+    if (!_match(_Tk.rpar)) {
+      throw FormatException(')');
+    }
+    final DateTime now = DateTime.now();
+    final String yyyy = now.year.toString().padLeft(4, '0');
+    final String mm = now.month.toString().padLeft(2, '0');
+    final String dd = now.day.toString().padLeft(2, '0');
+    return '$yyyy-$mm-$dd';
   }
 
   dynamic _parseLookupArgs() {
@@ -1030,6 +1043,21 @@ bool _truthy(dynamic v) {
 bool _compare(dynamic left, String op, dynamic right) {
   final String ls = TableFormulaEvaluator._stringify(left);
   final String rs = TableFormulaEvaluator._stringify(right);
+  final DateTime? ld = _tryParseDateOnlyComparable(ls);
+  final DateTime? rd = _tryParseDateOnlyComparable(rs);
+  if (ld != null && rd != null) {
+    final DateTime lDate = DateTime(ld.year, ld.month, ld.day);
+    final DateTime rDate = DateTime(rd.year, rd.month, rd.day);
+    return switch (op) {
+      '=' || '==' => lDate == rDate,
+      '!=' => lDate != rDate,
+      '<' => lDate.isBefore(rDate),
+      '>' => lDate.isAfter(rDate),
+      '<=' => lDate.isBefore(rDate) || lDate == rDate,
+      '>=' => lDate.isAfter(rDate) || lDate == rDate,
+      _ => false,
+    };
+  }
   final num? ln = num.tryParse(ls);
   final num? rn = num.tryParse(rs);
   if (ln != null && rn != null) {
@@ -1060,6 +1088,65 @@ dynamic _numBin(
   num Function(num a, num b) fn,
 ) {
   return fn(_toNum(left), _toNum(right));
+}
+
+DateTime? _tryParseDateOnlyComparable(String raw) {
+  final String text = raw.trim();
+  if (text.isEmpty) {
+    return null;
+  }
+  final DateTime? iso = DateTime.tryParse(text);
+  if (iso != null) {
+    return DateTime(iso.year, iso.month, iso.day);
+  }
+  final RegExp namedDate = RegExp(
+    r'^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$',
+    caseSensitive: false,
+  );
+  final RegExpMatch? match = namedDate.firstMatch(text);
+  if (match == null) {
+    return null;
+  }
+  final String monthRaw = match.group(1)!.toLowerCase();
+  final int? day = int.tryParse(match.group(2)!);
+  final int? year = int.tryParse(match.group(3)!);
+  if (day == null || year == null) {
+    return null;
+  }
+  const Map<String, int> monthMap = <String, int>{
+    'january': 1,
+    'february': 2,
+    'march': 3,
+    'april': 4,
+    'may': 5,
+    'june': 6,
+    'july': 7,
+    'august': 8,
+    'september': 9,
+    'october': 10,
+    'november': 11,
+    'december': 12,
+    'jan': 1,
+    'feb': 2,
+    'mar': 3,
+    'apr': 4,
+    'jun': 6,
+    'jul': 7,
+    'aug': 8,
+    'sep': 9,
+    'sept': 9,
+    'oct': 10,
+    'nov': 11,
+    'dec': 12,
+  };
+  final int? month = monthMap[monthRaw];
+  if (month == null) {
+    return null;
+  }
+  if (day < 1 || day > 31) {
+    return null;
+  }
+  return DateTime(year, month, day);
 }
 
 num _toNum(dynamic v) {

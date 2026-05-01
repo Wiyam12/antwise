@@ -24,6 +24,7 @@ class TableFormulaValidator {
     'COUNTIF',
     'IF',
     'LOOKUP',
+    'TODAY',
   };
 
   static bool isAllowedFunctionName(String name) =>

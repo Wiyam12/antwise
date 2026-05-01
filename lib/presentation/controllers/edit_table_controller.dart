@@ -1,4 +1,5 @@
 import 'package:antwise/core/app_snackbar.dart';
+import 'package:antwise/core/services/notification_runtime_service.dart';
 import 'package:antwise/domain/dropdown/dropdown_column_options.dart';
 import 'package:antwise/domain/entities/builder_page_entity.dart';
 import 'package:antwise/domain/entities/product_display_mode.dart';
@@ -687,12 +688,17 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
     if (schema == null) {
       return;
     }
+    final String savedRowId = rowId ?? _uuid.v4();
     await _saveRow(
       TableRowEntity(
-        id: rowId ?? _uuid.v4(),
+        id: savedRowId,
         tableId: schema.id,
         values: values,
       ),
+    );
+    await _evaluateNotificationRulesForRow(
+      tableId: schema.id,
+      rowId: savedRowId,
     );
     await _loadRows();
   }
@@ -1014,8 +1020,13 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       await _deleteRow(r.id);
     }
     for (final Map<String, dynamic> values in generated) {
+      final String generatedRowId = _uuid.v4();
       await _saveRow(
-        TableRowEntity(id: _uuid.v4(), tableId: schema.id, values: values),
+        TableRowEntity(id: generatedRowId, tableId: schema.id, values: values),
+      );
+      await _evaluateNotificationRulesForRow(
+        tableId: schema.id,
+        rowId: generatedRowId,
       );
     }
     await _loadRows();
@@ -1024,6 +1035,20 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
     }
     if (showSuccessMessage) {
       showAppSnackbar('Rows', 'Read-only rows updated');
+    }
+  }
+
+  Future<void> _evaluateNotificationRulesForRow({
+    required String tableId,
+    required String rowId,
+  }) async {
+    try {
+      await NotificationRuntimeService.evaluateRulesForRowChange(
+        tableId: tableId,
+        rowId: rowId,
+      );
+    } catch (_) {
+      // Best-effort only; row edits must never fail because notifications fail.
     }
   }
 
