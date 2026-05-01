@@ -63,7 +63,15 @@ class NotificationDispatcherService with WidgetsBindingObserver {
       'warning' => (color: Colors.orange, icon: Icons.schedule_rounded),
       _ => (color: Colors.blue, icon: Icons.info_outline_rounded),
     };
-    Get.closeAllSnackbars();
+    // GetX snackbar controller can throw if called too early in app lifecycle.
+    // Avoid crashing the app just to replace a snackbar.
+    try {
+      if (Get.isSnackbarOpen) {
+        Get.closeCurrentSnackbar();
+      }
+    } catch (_) {
+      // no-op
+    }
     Get.snackbar(
       data.title,
       data.body,

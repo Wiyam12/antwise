@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:antwise/core/services/logger_service.dart';
 import 'package:antwise/core/storage/hive_boxes.dart';
+import 'package:antwise/data/models/hive/app_settings_hive_model.dart';
 import 'package:antwise/data/models/hive/builder_page_hive_model.dart';
 import 'package:antwise/data/models/hive/builder_widget_hive_model.dart';
 import 'package:antwise/data/models/hive/navigation_config_hive_model.dart';
@@ -42,7 +43,7 @@ class SplashController extends GetxController {
 
       final bool downloaded = await checkFuture;
       await minDisplayFuture;
-      // await _writeStartupSnapshotJsonFile();
+      await _writeStartupSnapshotJsonFile();
 
       if (downloaded) {
         Get.offAllNamed<void>(AppRoutes.home);
@@ -190,6 +191,37 @@ class SplashController extends GetxController {
       }
     }
 
+    String activeAccountName = '';
+    final List<Map<String, dynamic>> notifications = <Map<String, dynamic>>[];
+    if (Hive.isBoxOpen(HiveBoxes.settingsBox)) {
+      final Box<AppSettingsHiveModel> settingsBox =
+          Hive.box<AppSettingsHiveModel>(HiveBoxes.settingsBox);
+      final AppSettingsHiveModel? settings = settingsBox.get('app_settings');
+      activeAccountName = settings?.activeAccountName.trim() ?? '';
+      if (activeAccountName.isNotEmpty) {
+        final Map<String, dynamic> workspaces =
+            _jsonSafe(settings?.accountWorkspaces) is Map
+                ? (settings!.accountWorkspaces)
+                : <String, dynamic>{};
+        final dynamic ws = workspaces[activeAccountName];
+        if (ws is Map) {
+          final dynamic raw = ws['notifications'];
+          if (raw is List) {
+            for (final dynamic item in raw) {
+              if (item is Map) {
+                notifications.add(
+                  item.map<String, dynamic>(
+                    (dynamic k, dynamic v) =>
+                        MapEntry<String, dynamic>(k.toString(), _jsonSafe(v)),
+                  ),
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+
     final Map<String, dynamic> snapshot = <String, dynamic>{
       'event': 'startup_snapshot',
       'schemaVersion': 2,
@@ -198,10 +230,12 @@ class SplashController extends GetxController {
         'tables': tables.length,
         'widgets': widgets.length,
       },
+      'activeAccountName': activeAccountName,
       'pages': pages,
       'tables': tables,
       'widgets': widgets,
       'navigation': navigation,
+      'notifications': notifications,
     };
 
     final Directory directory = await getApplicationDocumentsDirectory();

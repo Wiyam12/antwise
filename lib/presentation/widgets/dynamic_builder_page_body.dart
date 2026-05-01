@@ -1821,7 +1821,9 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       },
     );
     if (shouldSave != true) {
-      _disposeTextControllersSafely(textCtrls);
+      // Delay dispose to avoid "used after disposed" from lingering gesture/frame
+      // callbacks still referencing the modal's controllers.
+      Future<void>.microtask(() => _disposeTextControllersSafely(textCtrls));
       return;
     }
 
@@ -1865,11 +1867,9 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
     );
     if (validationError != null && validationError.isNotEmpty) {
       showAppSnackbar('Validation', validationError);
-      _disposeTextControllersSafely(textCtrls);
+      Future<void>.microtask(() => _disposeTextControllersSafely(textCtrls));
       return;
     }
-
-    _disposeTextControllersSafely(textCtrls);
 
     final TableRowEntity row = TableRowEntity(
       id: existing?.id ?? _uuid.v4(),
@@ -1943,6 +1943,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
       showAppSnackbar('${schema.name} Table', 'Data updated');
     }
     await _load();
+    Future<void>.microtask(() => _disposeTextControllersSafely(textCtrls));
   }
 
   String _generateAutoValue(TableColumnEntity column, String tableId) {

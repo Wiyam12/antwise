@@ -15,7 +15,9 @@ import 'package:antwise/domain/usecases/get_builder_pages_usecase.dart';
 import 'package:antwise/domain/usecases/get_navigation_config_usecase.dart';
 import 'package:antwise/domain/usecases/save_navigation_config_usecase.dart';
 import 'package:antwise/domain/validation/bottom_nav_layout_rules.dart';
+import 'package:antwise/core/services/notification_runtime_service.dart';
 import 'package:antwise/presentation/routes/app_routes.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:hive/hive.dart';
@@ -232,11 +234,17 @@ class HomeController extends GetxController {
     }
     isApplyingSetupTemplate.value = true;
     try {
+      final bool enableNotifications =
+          await _resolveTemplateNotificationPolicy();
+
       final String raw = await rootBundle.loadString(_simplePosSnapshotPath);
       final Map<String, dynamic> json = jsonDecode(raw) as Map<String, dynamic>;
       final List<Map<String, dynamic>> pagesRaw = _asMapList(json['pages']);
       final List<Map<String, dynamic>> tablesRaw = _asMapList(json['tables']);
       final List<Map<String, dynamic>> widgetsRaw = _asMapList(json['widgets']);
+      final List<Map<String, dynamic>> notificationsRaw = _asMapList(
+        json['notifications'],
+      );
       final Map<String, dynamic> navigationRaw = _asStringDynamicMap(
         json['navigation'],
       );
@@ -412,9 +420,20 @@ class HomeController extends GetxController {
 
       final Map<String, dynamic> workspaces =
           await _captureStoredWorkspacesWithActiveSnapshot();
-      workspaces[accountName.trim()] = _captureWorkspaceSnapshot(
+      final String targetAccount = accountName.trim();
+      final Map<String, dynamic> snapshot = _captureWorkspaceSnapshot(
         accountName: accountName.trim(),
       );
+      if (notificationsRaw.isNotEmpty) {
+        snapshot['notifications'] = notificationsRaw
+            .map((Map<String, dynamic> n) {
+              final Map<String, dynamic> item = Map<String, dynamic>.from(n);
+              item['enabled'] = enableNotifications;
+              return item;
+            })
+            .toList(growable: false);
+      }
+      workspaces[targetAccount] = snapshot;
       await _markSetupCompleted(
         accountName: accountName,
         accountWorkspaces: workspaces,
@@ -429,6 +448,56 @@ class HomeController extends GetxController {
       print('Failed to apply Simple POS template: $e');
     } finally {
       isApplyingSetupTemplate.value = false;
+    }
+  }
+
+  Future<bool> _resolveTemplateNotificationPolicy() async {
+    // Must happen BEFORE importing any data.
+    bool granted = await NotificationRuntimeService.ensurePermissionGranted();
+    if (granted) {
+      return true;
+    }
+
+    int retryCount = 0;
+    while (true) {
+      final bool? continueWithout = await Get.dialog<bool>(
+        AlertDialog(
+          title: const Text('Continue without notifications?'),
+          content: const Text(
+            'Some features like alerts and reminders will not work.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Get.back(result: false),
+              child: const Text('No'),
+            ),
+            FilledButton(
+              onPressed: () => Get.back(result: true),
+              child: const Text('Yes'),
+            ),
+          ],
+        ),
+        barrierDismissible: false,
+      );
+
+      if (continueWithout == true) {
+        return false;
+      }
+
+      // User chose "No" → re-trigger permission request.
+      retryCount++;
+      if (retryCount >= 3) {
+        Get.snackbar(
+          'Template',
+          'Setup cancelled. Notification permission is required to enable alerts.',
+          snackPosition: SnackPosition.BOTTOM,
+        );
+        throw Exception('Notification permission flow cancelled');
+      }
+      granted = await NotificationRuntimeService.ensurePermissionGranted();
+      if (granted) {
+        return true;
+      }
     }
   }
 
@@ -834,8 +903,8 @@ class HomeController extends GetxController {
       HiveBoxes.settingsBox,
     );
     final AppSettingsHiveModel? settings = box.get(_settingsKey);
-    final String targetAccount = (accountName ?? settings?.activeAccountName ?? '')
-        .trim();
+    final String targetAccount =
+        (accountName ?? settings?.activeAccountName ?? '').trim();
     if (targetAccount.isEmpty) {
       return const <Map<String, dynamic>>[];
     }

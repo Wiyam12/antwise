@@ -4,9 +4,8 @@
   "counts": {
     "pages": 4,
     "tables": 4,
-    "widgets": 10
+    "widgets": 9
   },
-  "activeAccountName": "POS",
   "pages": [
     {
       "id": "78fc326e-84ec-4190-baa8-326f41320914",
@@ -32,17 +31,16 @@
       "parentPageId": null,
       "nestedDisplayType": null,
       "nestedRootContentTabName": null,
-      "widgetGridCount": 2,
+      "widgetGridCount": 1,
       "layoutOrder": [
         "widgets",
         "table:99c0c35a-e146-42ab-a5e4-eaa85d37674e",
         "chart:c582cd7c-9fc9-4a5c-85a3-436949e92679",
         "chart:33ef6d51-0012-4205-aad4-1762eb04ffa5",
-        "chart:0f5b679c-e88d-4a28-919f-52cef22e73d7"
+        "chart:ddbc35cd-a657-46ad-b98e-a6b36b1324de"
       ],
       "widgetOrder": [
-        "52b9d6c9-adb3-4bef-b545-c6e9b63a6bb7",
-        "d9a271d0-6ee0-40fa-b23b-932896050f5c"
+        "52b9d6c9-adb3-4bef-b545-c6e9b63a6bb7"
       ]
     },
     {
@@ -94,7 +92,7 @@
       "summaryConfig": {},
       "inventoryDeduction": {},
       "affectingTables": [],
-      "validationRules": [],
+      "validationRules": null,
       "searchEnabled": true,
       "dataLoadingMode": "pagination",
       "pageSize": 10,
@@ -120,7 +118,6 @@
           "textSuffixIconKey": null,
           "textValidationKind": "none",
           "textCustomRegex": null,
-          "dateDefaultToday": false,
           "numberFieldHint": null,
           "numberPrefixText": null,
           "numberSuffixText": null,
@@ -154,7 +151,6 @@
           "textSuffixIconKey": null,
           "textValidationKind": "none",
           "textCustomRegex": null,
-          "dateDefaultToday": false,
           "numberFieldHint": null,
           "numberPrefixText": null,
           "numberSuffixText": null,
@@ -188,7 +184,6 @@
           "textSuffixIconKey": null,
           "textValidationKind": "none",
           "textCustomRegex": null,
-          "dateDefaultToday": false,
           "numberFieldHint": "Price",
           "numberPrefixText": "₱",
           "numberSuffixText": null,
@@ -222,7 +217,6 @@
           "textSuffixIconKey": null,
           "textValidationKind": "none",
           "textCustomRegex": null,
-          "dateDefaultToday": false,
           "numberFieldHint": "Stocks",
           "numberPrefixText": null,
           "numberSuffixText": null,
@@ -256,41 +250,6 @@
           "textSuffixIconKey": null,
           "textValidationKind": "none",
           "textCustomRegex": null,
-          "dateDefaultToday": false,
-          "numberFieldHint": null,
-          "numberPrefixText": null,
-          "numberSuffixText": null,
-          "numberPrefixIconKey": null,
-          "numberSuffixIconKey": null,
-          "numberMinValue": null,
-          "numberMaxValue": null,
-          "numberAllowDecimals": true,
-          "numberIntegerOnly": false,
-          "numberPositiveOnly": false,
-          "numberShowStepper": false,
-          "numberStepValue": 1.0
-        },
-        {
-          "id": "6861fe49-7e97-4d5b-8303-81616bbe4280",
-          "name": "Expiration",
-          "type": "date",
-          "includeInCreateForm": true,
-          "includeInEditForm": true,
-          "isRequired": false,
-          "isUnique": false,
-          "pattern": null,
-          "formula": null,
-          "formulaDefinition": null,
-          "dropdownOptions": [],
-          "dropdownSourceKind": "manual",
-          "dropdownSourceTableId": null,
-          "dropdownSourceColumnId": null,
-          "textFieldHint": null,
-          "textPrefixIconKey": null,
-          "textSuffixIconKey": null,
-          "textValidationKind": "none",
-          "textCustomRegex": null,
-          "dateDefaultToday": false,
           "numberFieldHint": null,
           "numberPrefixText": null,
           "numberSuffixText": null,
@@ -320,7 +279,7 @@
       "summaryConfig": {},
       "inventoryDeduction": {},
       "affectingTables": [],
-      "validationRules": [],
+      "validationRules": null,
       "searchEnabled": true,
       "dataLoadingMode": "lazy",
       "pageSize": 10,
@@ -445,7 +404,7 @@
       },
       "inventoryDeduction": {},
       "affectingTables": [],
-      "validationRules": [],
+      "validationRules": null,
       "searchEnabled": false,
       "dataLoadingMode": "lazy",
       "pageSize": 10,
@@ -884,22 +843,6 @@
       }
     },
     {
-      "id": "d9a271d0-6ee0-40fa-b23b-932896050f5c",
-      "pageId": "ba4a74d3-fdf4-4a70-a7af-be38a059d8a3",
-      "type": "card",
-      "config": {
-        "title": "Daily Transaction",
-        "widgetOrder": 5,
-        "cardLayout": "hero",
-        "heroCardName": "Daily Transaction",
-        "heroLabel": "Amount",
-        "heroBackgroundHex": "#0EA5E9",
-        "heroPrefixType": "text",
-        "heroPrefixText": "₱",
-        "formula": "SUM(IF(Transactions.Date=TODAY(), Transactions.\"Total Amount\", 0))"
-      }
-    },
-    {
       "id": "f7c8ee13-04dd-443d-a07b-1d147c3366c8",
       "pageId": "ba4a74d3-fdf4-4a70-a7af-be38a059d8a3",
       "type": "table",
@@ -914,9 +857,7 @@
       "d3e54a5a-8bb2-43ba-9538-9a9e96eeb4de",
       "d50a2cee-af5e-4d8f-bf06-9bc32b326b65"
     ],
-    "drawerPageIds": [
-      "78fc326e-84ec-4190-baa8-326f41320914"
-    ],
+    "drawerPageIds": [],
     "activePageId": "ba4a74d3-fdf4-4a70-a7af-be38a059d8a3",
     "mainPageId": "ba4a74d3-fdf4-4a70-a7af-be38a059d8a3",
     "bottomNavLayout": "floatingCenterAction",
@@ -938,39 +879,5 @@
       "layoutOptionId": "softCard",
       "displayConfig": {}
     }
-  },
-  "notifications": [
-    {
-      "ruleId": "rule_1777650815072774",
-      "enabled": true,
-      "tableId": "285f53cf-b031-4f07-8150-515d98309ffa",
-      "columnId": "6861fe49-7e97-4d5b-8303-81616bbe4280",
-      "conditionFamily": "date",
-      "dateCondition": "today",
-      "withinValue": 7,
-      "withinUnit": "weeks",
-      "numericCondition": "gt",
-      "scope": "daily",
-      "threshold": "",
-      "severity": "danger",
-      "title": "Expired",
-      "message": "<Products.Product Name> is EXPIRED!"
-    },
-    {
-      "ruleId": "rule_1777650855322773",
-      "enabled": true,
-      "tableId": "285f53cf-b031-4f07-8150-515d98309ffa",
-      "columnId": "6861fe49-7e97-4d5b-8303-81616bbe4280",
-      "conditionFamily": "date",
-      "dateCondition": "within",
-      "withinValue": 7,
-      "withinUnit": "days",
-      "numericCondition": "gt",
-      "scope": "daily",
-      "threshold": "",
-      "severity": "warning",
-      "title": "EXPIRATION",
-      "message": "<Products.Product Name> is expiring within 7 days!"
-    }
-  ]
+  }
 }

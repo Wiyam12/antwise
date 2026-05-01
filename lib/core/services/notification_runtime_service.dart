@@ -44,6 +44,24 @@ class NotificationRuntimeService {
   static const String _channelDescription =
       'Rule based workspace notifications';
   static final RegExp _placeholderPattern = RegExp(r'<([^<>]+)>');
+  static const String _kPermissionGrantedCacheKey =
+      'notification_permission_granted_cache';
+  static int _dateRulePriority(Map<String, dynamic> rule) {
+    final dynamic raw = rule['priority'];
+    final int? manual =
+        raw is num ? raw.toInt() : int.tryParse((raw ?? '').toString().trim());
+    if (manual != null) {
+      return manual;
+    }
+    final String condition = (rule['dateCondition'] ?? 'today').toString();
+    return switch (condition) {
+      'today' => 100,
+      'within' => 80,
+      'before' => 60,
+      'after' => 60,
+      _ => 50,
+    };
+  }
 
   static Future<void> ensureInitialized() async {
     if (_initialized) {
@@ -92,10 +110,14 @@ class NotificationRuntimeService {
       final bool enabled =
           await androidPlatform.areNotificationsEnabled() ?? false;
       if (enabled) {
+        final SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_kPermissionGrantedCacheKey, true);
         return true;
       }
       final bool granted =
           await androidPlatform.requestNotificationsPermission() ?? false;
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kPermissionGrantedCacheKey, granted);
       return granted;
     }
 
@@ -112,10 +134,86 @@ class NotificationRuntimeService {
             sound: true,
           ) ??
           false;
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kPermissionGrantedCacheKey, granted);
       return granted;
     }
 
     return false;
+  }
+
+  /// Checks current OS permission state without forcing a prompt.
+  /// Used for sync/detection flows (e.g. permission revoked in Settings).
+  static Future<bool> isPermissionGranted() async {
+    await ensureInitialized();
+
+    final AndroidFlutterLocalNotificationsPlugin? androidPlatform =
+        _plugin
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >();
+    if (androidPlatform != null) {
+      return await androidPlatform.areNotificationsEnabled() ?? false;
+    }
+
+    // iOS: check current permission state without prompting (if supported).
+    final IOSFlutterLocalNotificationsPlugin? iosPlatform =
+        _plugin
+            .resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin
+            >();
+    if (iosPlatform != null) {
+      try {
+        final dynamic perms = await (iosPlatform as dynamic).checkPermissions();
+        if (perms != null) {
+          final bool granted =
+              (perms.alert == true) ||
+              (perms.badge == true) ||
+              (perms.sound == true);
+          final SharedPreferences prefs = await SharedPreferences.getInstance();
+          await prefs.setBool(_kPermissionGrantedCacheKey, granted);
+          return granted;
+        }
+      } catch (_) {
+        // Fall through to fallback request below.
+      }
+      final bool granted =
+          await iosPlatform.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+          ) ??
+          false;
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kPermissionGrantedCacheKey, granted);
+      return granted;
+    }
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_kPermissionGrantedCacheKey) ?? false;
+  }
+
+  static Future<void> clearTriggerHistoryForRule({
+    required String accountName,
+    required String ruleId,
+  }) async {
+    final String trimmedAccount = accountName.trim();
+    final String trimmedRuleId = ruleId.trim();
+    if (trimmedAccount.isEmpty || trimmedRuleId.isEmpty) {
+      return;
+    }
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String triggerStateKey = 'notification_trigger_state_$trimmedAccount';
+    final Map<String, Map<String, dynamic>> triggerState = _readTriggerState(
+      prefs.getString(triggerStateKey),
+    );
+    final String prefix = 'rule:$trimmedRuleId|';
+    triggerState.removeWhere((String key, Map<String, dynamic> _) {
+      return key.startsWith(prefix);
+    });
+    await prefs.setString(
+      triggerStateKey,
+      jsonEncode(_boundedTriggerState(triggerState, maxEntries: 1500)),
+    );
   }
 
   static Future<void> setupBackgroundChecks() async {
@@ -133,6 +231,9 @@ class NotificationRuntimeService {
     required String rowId,
   }) async {
     await ensureInitialized();
+    if (!await isPermissionGranted()) {
+      return 0;
+    }
     return evaluateRulesAndNotify(changedTableId: tableId, changedRowId: rowId);
   }
 
@@ -141,6 +242,10 @@ class NotificationRuntimeService {
     String? changedRowId,
     String? targetRuleId,
   }) async {
+    if (!await isPermissionGranted()) {
+      print('[NotificationRuntime] skip: permission_not_granted');
+      return 0;
+    }
     if (!Hive.isBoxOpen(HiveBoxes.settingsBox)) {
       return 0;
     }
@@ -204,6 +309,405 @@ class NotificationRuntimeService {
     );
     int triggeredCount = 0;
 
+    // Date-based rules need priority evaluation per row (e.g. Today > Within X days),
+    // so we evaluate them as a group first.
+    final List<
+      ({
+        Map<String, dynamic> rule,
+        String ruleId,
+        String tableId,
+        String columnId,
+        int priority,
+      })
+    >
+    dateRules =
+        <
+          ({
+            Map<String, dynamic> rule,
+            String ruleId,
+            String tableId,
+            String columnId,
+            int priority,
+          })
+        >[];
+    for (int index = 0; index < rules.length; index++) {
+      final Map<String, dynamic> rule = rules[index];
+      final String ruleId =
+          (rule['ruleId'] ?? '').toString().trim().isEmpty
+              ? 'rule_index_$index'
+              : (rule['ruleId'] ?? '').toString().trim();
+      if (targetRuleId != null &&
+          targetRuleId.isNotEmpty &&
+          targetRuleId != ruleId) {
+        continue;
+      }
+      if (rule['enabled'] != true) {
+        continue;
+      }
+      final String conditionFamily =
+          (rule['conditionFamily'] ?? 'date').toString();
+      if (conditionFamily != 'date') {
+        continue;
+      }
+      final String tableId = (rule['tableId'] ?? '').toString();
+      final String columnId = (rule['columnId'] ?? '').toString();
+      if (tableId.isEmpty || columnId.isEmpty) {
+        continue;
+      }
+      if (changedTableId != null &&
+          changedTableId.isNotEmpty &&
+          tableId != changedTableId) {
+        continue;
+      }
+      dateRules.add((
+        rule: rule,
+        ruleId: ruleId,
+        tableId: tableId,
+        columnId: columnId,
+        priority: _dateRulePriority(rule),
+      ));
+    }
+
+    final Map<
+      String,
+      List<({Map<String, dynamic> rule, String ruleId, int priority})>
+    >
+    dateRulesByTableColumn =
+        <
+          String,
+          List<({Map<String, dynamic> rule, String ruleId, int priority})>
+        >{};
+    for (final ({
+          Map<String, dynamic> rule,
+          String ruleId,
+          String tableId,
+          String columnId,
+          int priority,
+        })
+        item
+        in dateRules) {
+      dateRulesByTableColumn
+          .putIfAbsent(
+            '${item.tableId}|${item.columnId}',
+            () =>
+                <({Map<String, dynamic> rule, String ruleId, int priority})>[],
+          )
+          .add((rule: item.rule, ruleId: item.ruleId, priority: item.priority));
+    }
+
+    final Map<
+      String,
+      List<
+        ({
+          TableRowHiveModel row,
+          String triggerIdentity,
+          String currentTriggerKey,
+          String body,
+          String title,
+          String severity,
+          String ruleId,
+          String tableId,
+        })
+      >
+    >
+    pendingDateTriggersByRuleId =
+        <
+          String,
+          List<
+            ({
+              TableRowHiveModel row,
+              String triggerIdentity,
+              String currentTriggerKey,
+              String body,
+              String title,
+              String severity,
+              String ruleId,
+              String tableId,
+            })
+          >
+        >{};
+
+    for (final MapEntry<
+          String,
+          List<({Map<String, dynamic> rule, String ruleId, int priority})>
+        >
+        entry
+        in dateRulesByTableColumn.entries) {
+      final List<String> parts = entry.key.split('|');
+      if (parts.length != 2) {
+        continue;
+      }
+      final String tableId = parts[0];
+      final String columnId = parts[1];
+      final TableSchemaHiveModel? schema = tableById[tableId];
+      if (schema == null) {
+        continue;
+      }
+      final List<TableRowHiveModel> rows =
+          rowsByTableId[tableId] ?? <TableRowHiveModel>[];
+      if (rows.isEmpty) {
+        continue;
+      }
+      // Higher priority first; stable tie-breaker by ruleId.
+      final List<({Map<String, dynamic> rule, String ruleId, int priority})>
+      candidates = entry.value.toList(growable: false)..sort((a, b) {
+        final int p = b.priority.compareTo(a.priority);
+        if (p != 0) return p;
+        return a.ruleId.compareTo(b.ruleId);
+      });
+      print(
+        '[NotificationRuntime] date candidates table=$tableId col=$columnId '
+        '${candidates.map((c) => '${c.ruleId}:${c.priority}:${(c.rule['dateCondition'] ?? '').toString()}').join(', ')}',
+      );
+
+      for (final TableRowHiveModel row in rows) {
+        if (changedRowId != null &&
+            changedRowId.isNotEmpty &&
+            row.id != changedRowId) {
+          continue;
+        }
+        final DateTime? rowDate = DateTime.tryParse(
+          (row.values[columnId] ?? '').toString().trim(),
+        );
+        if (rowDate == null) {
+          continue;
+        }
+
+        final String rowDateFingerprint =
+            '${rowDate.year}-${rowDate.month}-${rowDate.day}';
+        final Map<String, String> previousObservedByIdentity =
+            <String, String>{};
+        for (final ({Map<String, dynamic> rule, String ruleId, int priority})
+            candidate
+            in candidates) {
+          final String identity = 'rule:${candidate.ruleId}|row:${row.id}';
+          final Map<String, dynamic> existing =
+              triggerState[identity] ?? <String, dynamic>{};
+          previousObservedByIdentity[identity] =
+              (existing['lastObservedValue'] ?? '').toString();
+          triggerState[identity] = <String, dynamic>{
+            ...existing,
+            'lastObservedValue': rowDateFingerprint,
+            'lastObservedAt': now.toIso8601String(),
+          };
+        }
+
+        // Find the best (highest priority) matching rule for this row.
+        ({Map<String, dynamic> rule, String ruleId, int priority})? best;
+        for (final ({Map<String, dynamic> rule, String ruleId, int priority})
+            candidate
+            in candidates) {
+          final Map<String, dynamic> rule = candidate.rule;
+          final String dateCondition =
+              (rule['dateCondition'] ?? 'today').toString();
+          final int withinValue =
+              (rule['withinValue'] as num?)?.toInt() ??
+              int.tryParse((rule['withinValue'] ?? '0').toString()) ??
+              0;
+          final String withinUnit = (rule['withinUnit'] ?? 'weeks').toString();
+          final bool matched = _matchesDateCondition(
+            now: now,
+            rowDate: rowDate,
+            condition: dateCondition,
+            withinValue: withinValue,
+            withinUnit: withinUnit,
+          );
+          if (matched) {
+            best = candidate;
+            break;
+          }
+        }
+        if (best == null) {
+          continue;
+        }
+        print(
+          '[NotificationRuntime] date best row=${row.id} '
+          'picked=${best.ruleId} priority=${best.priority} '
+          'condition=${(best.rule['dateCondition'] ?? '').toString()}',
+        );
+
+        final Map<String, dynamic> rule = best.rule;
+        final String ruleId = best.ruleId;
+        final String title =
+            (rule['title'] ?? '').toString().trim().isEmpty
+                ? 'Workspace Notification'
+                : (rule['title'] ?? '').toString().trim();
+        final String configuredMessage =
+            (rule['message'] ?? '').toString().trim();
+        final String severity = (rule['severity'] ?? 'info').toString();
+        final String dateCondition =
+            (rule['dateCondition'] ?? 'today').toString();
+        final int withinValue =
+            (rule['withinValue'] as num?)?.toInt() ??
+            int.tryParse((rule['withinValue'] ?? '0').toString()) ??
+            0;
+        final String withinUnit = (rule['withinUnit'] ?? 'weeks').toString();
+
+        final String triggerIdentity = 'rule:$ruleId|row:${row.id}';
+        final String currentTriggerKey = switch (dateCondition) {
+          'within' =>
+            '$triggerIdentity|condition:$dateCondition|value:$rowDateFingerprint|within:$withinValue|unit:$withinUnit',
+          _ =>
+            '$triggerIdentity|condition:$dateCondition|value:$rowDateFingerprint',
+        };
+        final Map<String, dynamic>? lastState = triggerState[triggerIdentity];
+        final String lastTriggeredKey =
+            (lastState?['lastTriggeredKey'] ?? '').toString();
+        final String prevObserved =
+            previousObservedByIdentity[triggerIdentity] ?? '';
+        final bool isSameTriggerKey = lastTriggeredKey == currentTriggerKey;
+        final bool observedUnchanged = prevObserved == rowDateFingerprint;
+        if (isSameTriggerKey && observedUnchanged) {
+          print(
+            '[NotificationRuntime] skip ruleId=$ruleId row=${row.id} '
+            'reason=duplicate_trigger_key',
+          );
+          continue;
+        }
+
+        final String body =
+            configuredMessage.isEmpty
+                ? 'Date condition met for ${schema.name}.'
+                : _resolveRuntimeMessage(
+                  messageTemplate: configuredMessage,
+                  fallbackSchema: schema,
+                  fallbackRow: row,
+                  tableByName: tableByName,
+                  rowsByTableId: rowsByTableId,
+                );
+
+        pendingDateTriggersByRuleId
+            .putIfAbsent(
+              ruleId,
+              () =>
+                  <
+                    ({
+                      TableRowHiveModel row,
+                      String triggerIdentity,
+                      String currentTriggerKey,
+                      String body,
+                      String title,
+                      String severity,
+                      String ruleId,
+                      String tableId,
+                    })
+                  >[],
+            )
+            .add((
+              row: row,
+              triggerIdentity: triggerIdentity,
+              currentTriggerKey: currentTriggerKey,
+              body: body,
+              title: title,
+              severity: severity,
+              ruleId: ruleId,
+              tableId: tableId,
+            ));
+      }
+    }
+
+    // Dispatch date triggers with batching (max 3 individual + 1 summary),
+    // but only after priority has selected ONE rule per row.
+    for (final MapEntry<
+          String,
+          List<
+            ({
+              TableRowHiveModel row,
+              String triggerIdentity,
+              String currentTriggerKey,
+              String body,
+              String title,
+              String severity,
+              String ruleId,
+              String tableId,
+            })
+          >
+        >
+        entry
+        in pendingDateTriggersByRuleId.entries) {
+      final String ruleId = entry.key;
+      final List<
+        ({
+          TableRowHiveModel row,
+          String triggerIdentity,
+          String currentTriggerKey,
+          String body,
+          String title,
+          String severity,
+          String ruleId,
+          String tableId,
+        })
+      >
+      pending = entry.value;
+      if (pending.isEmpty) {
+        continue;
+      }
+      const int maxIndividualNotifications = 3;
+      final int individualCount =
+          pending.length > maxIndividualNotifications
+              ? maxIndividualNotifications
+              : pending.length;
+      for (int i = 0; i < individualCount; i++) {
+        final item = pending[i];
+        await _showNotification(
+          id: item.currentTriggerKey.hashCode,
+          title: item.title,
+          body: item.body,
+          severity: item.severity,
+        );
+        print(
+          '[NotificationRuntime] trigger ruleId=$ruleId row=${item.row.id} '
+          'type=date key=${item.currentTriggerKey}',
+        );
+        triggeredCount++;
+        triggerState[item.triggerIdentity] = <String, dynamic>{
+          'lastTriggeredKey': item.currentTriggerKey,
+          'lastTriggeredAt': now.toIso8601String(),
+        };
+      }
+      for (int i = individualCount; i < pending.length; i++) {
+        final item = pending[i];
+        triggerState[item.triggerIdentity] = <String, dynamic>{
+          'lastTriggeredKey': item.currentTriggerKey,
+          'lastTriggeredAt': now.toIso8601String(),
+        };
+      }
+      final int remainingCount = pending.length - individualCount;
+      if (remainingCount > 0) {
+        final String tableId = pending.first.tableId;
+        final TableSchemaHiveModel? schema = tableById[tableId];
+        final String summaryIdentity =
+            'rule:$ruleId|table:$tableId|summary:date';
+        final String summaryDay = '${now.year}-${now.month}-${now.day}';
+        final String summaryTriggerKey =
+            '$summaryIdentity|remaining:$remainingCount|day:$summaryDay';
+        final Map<String, dynamic>? lastSummaryState =
+            triggerState[summaryIdentity];
+        if ((lastSummaryState?['lastTriggeredKey'] ?? '').toString() !=
+            summaryTriggerKey) {
+          final String summaryBody =
+              schema == null
+                  ? '$remainingCount more item(s) matched this notification.'
+                  : '$remainingCount more ${schema.name} item(s) matched this notification.';
+          await _showNotification(
+            id: summaryTriggerKey.hashCode,
+            title: '${pending.first.title} (Summary)',
+            body: summaryBody,
+            severity: pending.first.severity,
+          );
+          print(
+            '[NotificationRuntime] trigger ruleId=$ruleId type=date-summary '
+            'key=$summaryTriggerKey',
+          );
+          triggeredCount++;
+          triggerState[summaryIdentity] = <String, dynamic>{
+            'lastTriggeredKey': summaryTriggerKey,
+            'lastTriggeredAt': now.toIso8601String(),
+          };
+        }
+      }
+    }
+
     for (int index = 0; index < rules.length; index++) {
       final Map<String, dynamic> rule = rules[index];
       final String ruleId =
@@ -263,180 +767,7 @@ class NotificationRuntimeService {
           (rule['conditionFamily'] ?? 'date').toString();
 
       if (conditionFamily == 'date') {
-        final String dateCondition =
-            (rule['dateCondition'] ?? 'today').toString();
-        final int withinValue =
-            (rule['withinValue'] as num?)?.toInt() ??
-            int.tryParse((rule['withinValue'] ?? '0').toString()) ??
-            0;
-        final String withinUnit = (rule['withinUnit'] ?? 'weeks').toString();
-        final List<
-          ({
-            TableRowHiveModel row,
-            String triggerIdentity,
-            String currentTriggerKey,
-            String body,
-          })
-        >
-        pendingDateTriggers =
-            <
-              ({
-                TableRowHiveModel row,
-                String triggerIdentity,
-                String currentTriggerKey,
-                String body,
-              })
-            >[];
-        for (final TableRowHiveModel row in rows) {
-          if (changedRowId != null &&
-              changedRowId.isNotEmpty &&
-              row.id != changedRowId) {
-            print(
-              '[NotificationRuntime] skip ruleId=$ruleId row=${row.id} '
-              'reason=changed_row_filter',
-            );
-            continue;
-          }
-          final DateTime? rowDate = DateTime.tryParse(
-            (row.values[columnId] ?? '').toString().trim(),
-          );
-          if (rowDate == null) {
-            print(
-              '[NotificationRuntime] skip ruleId=$ruleId row=${row.id} '
-              'reason=invalid_date',
-            );
-            continue;
-          }
-          final bool matched = _matchesDateCondition(
-            now: now,
-            rowDate: rowDate,
-            condition: dateCondition,
-            withinValue: withinValue,
-            withinUnit: withinUnit,
-          );
-          if (!matched) {
-            print(
-              '[NotificationRuntime] skip ruleId=$ruleId row=${row.id} '
-              'reason=condition_not_matched',
-            );
-            continue;
-          }
-          final String rowDateFingerprint =
-              '${rowDate.year}-${rowDate.month}-${rowDate.day}';
-          final String triggerIdentity = 'rule:$ruleId|row:${row.id}';
-          final String currentTriggerKey =
-              '$triggerIdentity|condition:$dateCondition|value:$rowDateFingerprint|within:$withinValue|unit:$withinUnit';
-          final Map<String, dynamic>? lastState = triggerState[triggerIdentity];
-          if ((lastState?['lastTriggeredKey'] ?? '').toString() ==
-              currentTriggerKey) {
-            print(
-              '[NotificationRuntime] skip ruleId=$ruleId row=${row.id} '
-              'reason=duplicate_trigger_key',
-            );
-            continue;
-          }
-          final String body =
-              configuredMessage.isEmpty
-                  ? 'Date condition met for ${schema.name}.'
-                  : _resolveRuntimeMessage(
-                    messageTemplate: configuredMessage,
-                    fallbackSchema: schema,
-                    fallbackRow: row,
-                    tableByName: tableByName,
-                    rowsByTableId: rowsByTableId,
-                  );
-          pendingDateTriggers.add((
-            row: row,
-            triggerIdentity: triggerIdentity,
-            currentTriggerKey: currentTriggerKey,
-            body: body,
-          ));
-        }
-        if (pendingDateTriggers.isEmpty) {
-          continue;
-        }
-        const int maxIndividualNotifications = 3;
-        final int individualCount =
-            pendingDateTriggers.length > maxIndividualNotifications
-                ? maxIndividualNotifications
-                : pendingDateTriggers.length;
-        for (int i = 0; i < individualCount; i++) {
-          final ({
-            TableRowHiveModel row,
-            String triggerIdentity,
-            String currentTriggerKey,
-            String body,
-          })
-          item = pendingDateTriggers[i];
-          await _showNotification(
-            id: item.currentTriggerKey.hashCode,
-            title: title,
-            body: item.body,
-            severity: severity,
-          );
-          print(
-            '[NotificationRuntime] trigger ruleId=$ruleId row=${item.row.id} '
-            'type=date key=${item.currentTriggerKey}',
-          );
-          triggeredCount++;
-          triggerState[item.triggerIdentity] = <String, dynamic>{
-            'lastTriggeredKey': item.currentTriggerKey,
-            'lastTriggeredAt': now.toIso8601String(),
-          };
-        }
-        for (int i = individualCount; i < pendingDateTriggers.length; i++) {
-          final ({
-            TableRowHiveModel row,
-            String triggerIdentity,
-            String currentTriggerKey,
-            String body,
-          })
-          item = pendingDateTriggers[i];
-          triggerState[item.triggerIdentity] = <String, dynamic>{
-            'lastTriggeredKey': item.currentTriggerKey,
-            'lastTriggeredAt': now.toIso8601String(),
-          };
-        }
-        final int remainingCount = pendingDateTriggers.length - individualCount;
-        if (remainingCount > 0) {
-          final String summaryIdentity =
-              'rule:$ruleId|table:$tableId|summary:date';
-          final String summaryDay = '${now.year}-${now.month}-${now.day}';
-          final String summaryTriggerKey =
-              '$summaryIdentity|condition:$dateCondition|within:$withinValue|unit:$withinUnit|remaining:$remainingCount|day:$summaryDay';
-          final Map<String, dynamic>? lastSummaryState =
-              triggerState[summaryIdentity];
-          if ((lastSummaryState?['lastTriggeredKey'] ?? '').toString() !=
-              summaryTriggerKey) {
-            final String summaryBody = switch (dateCondition) {
-              'today' =>
-                '$remainingCount more ${schema.name} item(s) are due today.',
-              'within' =>
-                '$remainingCount more ${schema.name} item(s) are within $withinValue $withinUnit.',
-              'before' =>
-                '$remainingCount more ${schema.name} item(s) are before today.',
-              'after' =>
-                '$remainingCount more ${schema.name} item(s) are after today.',
-              _ =>
-                '$remainingCount more ${schema.name} item(s) matched this notification.',
-            };
-            await _showNotification(
-              id: summaryTriggerKey.hashCode,
-              title: '$title (Summary)',
-              body: summaryBody,
-              severity: severity,
-            );
-            print(
-              '[NotificationRuntime] trigger ruleId=$ruleId type=date-summary '
-              'key=$summaryTriggerKey',
-            );
-            triggeredCount++;
-            triggerState[summaryIdentity] = <String, dynamic>{
-              'lastTriggeredKey': summaryTriggerKey,
-              'lastTriggeredAt': now.toIso8601String(),
-            };
-          }
-        }
+        // Date-based rules are evaluated earlier in a priority-based pass.
         continue;
       }
 

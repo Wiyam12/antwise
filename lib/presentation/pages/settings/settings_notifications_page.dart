@@ -22,11 +22,89 @@ class _SettingsNotificationsPageState extends State<SettingsNotificationsPage> {
 
   String _activeAccountName = '';
   List<Map<String, dynamic>> _rules = <Map<String, dynamic>>[];
+  bool _warnedNoPermission = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(_NotificationsLifecycleObserver(this));
     _loadRules();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncPermissionAndRules(showSnackbar: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(
+      _NotificationsLifecycleObserver(this),
+    );
+    super.dispose();
+  }
+
+  Future<void> _syncPermissionAndRules({required bool showSnackbar}) async {
+    final bool granted = await NotificationRuntimeService.isPermissionGranted();
+    if (!granted && showSnackbar && !_warnedNoPermission) {
+      _warnedNoPermission = true;
+      Get.snackbar(
+        'Notifications',
+        'Notification permission is required to create notifications.',
+        snackPosition: SnackPosition.BOTTOM,
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        borderRadius: 12,
+        duration: const Duration(seconds: 3),
+      );
+    }
+    if (granted) {
+      return;
+    }
+    final bool anyEnabled = _rules.any(
+      (Map<String, dynamic> r) => r['enabled'] == true,
+    );
+    if (!anyEnabled) {
+      return;
+    }
+    await _disableAllRulesInStorage();
+    _loadRules();
+  }
+
+  Future<void> _disableAllRulesInStorage() async {
+    if (!Hive.isBoxOpen(HiveBoxes.settingsBox)) {
+      return;
+    }
+    final Box<AppSettingsHiveModel> box = Hive.box<AppSettingsHiveModel>(
+      HiveBoxes.settingsBox,
+    );
+    final AppSettingsHiveModel? old = box.get(_settingsKey);
+    final Map<String, dynamic> workspaces = _asStringDynamicMap(
+      old?.accountWorkspaces,
+    );
+    final Map<String, dynamic> workspace = _asStringDynamicMap(
+      workspaces[_activeAccountName],
+    );
+    final List<Map<String, dynamic>> notifications = _asMapList(
+          workspace['notifications'],
+        )
+        .map((Map<String, dynamic> item) {
+          final Map<String, dynamic> copy = Map<String, dynamic>.from(item);
+          copy['enabled'] = false;
+          return copy;
+        })
+        .toList(growable: false);
+    workspace['notifications'] = notifications;
+    workspaces[_activeAccountName] = workspace;
+    await box.put(
+      _settingsKey,
+      AppSettingsHiveModel(
+        resourcesDownloaded: old?.resourcesDownloaded ?? false,
+        themeMode: old?.themeMode ?? 'system',
+        firstInstallCompleted: old?.firstInstallCompleted ?? false,
+        themePresetName: old?.themePresetName ?? 'Ocean Blue',
+        accountNames: old?.accountNames ?? const <String>[],
+        activeAccountName: old?.activeAccountName ?? _activeAccountName,
+        accountWorkspaces: workspaces,
+      ),
+    );
   }
 
   void _loadRules() {
@@ -57,20 +135,22 @@ class _SettingsNotificationsPageState extends State<SettingsNotificationsPage> {
   }
 
   Future<void> _openRuleBuilder({int? editingIndex}) async {
+    final bool granted = await NotificationRuntimeService.isPermissionGranted();
+    print('granted: $granted');
+    if (!granted) {
+      Get.snackbar(
+        'Notifications',
+        'Notification permission is required to create notifications.',
+        snackPosition: SnackPosition.BOTTOM,
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        borderRadius: 12,
+        duration: const Duration(seconds: 3),
+      );
+      return;
+    }
+    // Permission is granted. For Create New, request once if still needed on iOS.
     if (editingIndex == null) {
-      final bool granted =
-          await NotificationRuntimeService.ensurePermissionGranted();
-      if (!granted) {
-        Get.snackbar(
-          'Notifications',
-          'Notification permission is required to create notifications.',
-          snackPosition: SnackPosition.BOTTOM,
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          borderRadius: 12,
-          duration: const Duration(seconds: 3),
-        );
-        return;
-      }
+      await NotificationRuntimeService.ensurePermissionGranted();
     }
     final Map<String, dynamic>? initialRule =
         editingIndex == null ? null : _rules[editingIndex];
@@ -235,6 +315,18 @@ class _SettingsNotificationsPageState extends State<SettingsNotificationsPage> {
         },
       ),
     );
+  }
+}
+
+class _NotificationsLifecycleObserver with WidgetsBindingObserver {
+  _NotificationsLifecycleObserver(this._state);
+  final _SettingsNotificationsPageState _state;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _state._syncPermissionAndRules(showSnackbar: true);
+    }
   }
 }
 
@@ -560,6 +652,10 @@ class _SettingsNotificationRulePageState
         activeAccountName: old?.activeAccountName ?? _activeAccountName,
         accountWorkspaces: workspaces,
       ),
+    );
+    await NotificationRuntimeService.clearTriggerHistoryForRule(
+      accountName: _activeAccountName,
+      ruleId: ruleId,
     );
     await NotificationRuntimeService.evaluateRulesAndNotify(
       targetRuleId: ruleId,
