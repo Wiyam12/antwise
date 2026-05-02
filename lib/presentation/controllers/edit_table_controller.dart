@@ -61,6 +61,9 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
   final RxnString selectedPageId = RxnString();
   final RxList<PageOption> pageOptions = <PageOption>[].obs;
   final RxList<EditColumnDraft> columns = <EditColumnDraft>[].obs;
+
+  /// At most one column [ExpansionTile] expanded at a time; set when adding a column.
+  final RxnString expandedColumnId = RxnString();
   final RxInt currentStep = 0.obs;
   final RxnString selectedVisualLayoutKey = RxnString();
   final Rxn<ProductDisplayMode> productDisplayMode = Rxn<ProductDisplayMode>();
@@ -674,7 +677,9 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
   }
 
   void addColumn() {
-    columns.add(EditColumnDraft(id: _uuid.v4()));
+    final EditColumnDraft draft = EditColumnDraft(id: _uuid.v4());
+    columns.add(draft);
+    expandedColumnId.value = draft.id;
     _syncReadOnlyDraftsWithColumns();
   }
 
@@ -786,6 +791,9 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
       return;
     }
     final EditColumnDraft removed = columns.removeAt(index);
+    if (expandedColumnId.value == removed.id) {
+      expandedColumnId.value = null;
+    }
     formulaFieldErrors.remove(removed.id);
     dropdownFieldErrors.remove(removed.id);
     formulaBuilderFieldErrors.removeWhere(

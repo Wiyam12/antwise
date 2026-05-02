@@ -2352,7 +2352,7 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(24),
             child: Container(
-              constraints: BoxConstraints(minHeight: compact ? 130 : 160),
+              constraints: BoxConstraints(minHeight: compact ? 100 : 160),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
@@ -2396,10 +2396,10 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                           : theme.textTheme.titleMedium)
                       ?.copyWith(color: Colors.white.withValues(alpha: 0.85));
                   final TextStyle? valueStyle = (veryNarrow
-                          ? theme.textTheme.titleMedium
+                          ? theme.textTheme.headlineMedium
                           : narrow || compact
-                          ? theme.textTheme.headlineSmall
-                          : theme.textTheme.displaySmall)
+                          ? theme.textTheme.headlineMedium
+                          : theme.textTheme.displayMedium)
                       ?.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.w500,
@@ -3660,6 +3660,8 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
     return Transform.rotate(angle: -0.55, child: sideTitle);
   }
 
+  static const double _kCardGridGap = 12;
+
   Widget _buildCardsGroup(ThemeData theme, List<BuilderWidgetEntity> cards) {
     if (cards.isEmpty) {
       return const SizedBox.shrink();
@@ -3667,27 +3669,133 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
     final int gridCount = widget.page.widgetGridCount.clamp(1, 3);
     if (gridCount == 1) {
       return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          for (final BuilderWidgetEntity card in cards) ...<Widget>[
-            _buildCardSection(theme, card),
-            if (card != cards.last) const SizedBox(height: 12),
+          for (int i = 0; i < cards.length; i++) ...<Widget>[
+            _buildCardSection(theme, cards[i]),
+            if (i < cards.length - 1) const SizedBox(height: _kCardGridGap),
           ],
         ],
       );
     }
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: gridCount,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        childAspectRatio: gridCount >= 3 ? 1.05 : 1.2,
-      ),
-      itemCount: cards.length,
-      itemBuilder: (BuildContext context, int index) {
-        return _buildCardSection(theme, cards[index], compact: true);
-      },
+    if (gridCount == 2) {
+      return _buildCardsGroupTwoColumn(theme, cards);
+    }
+    return _buildCardsGroupThreeColumn(theme, cards);
+  }
+
+  /// Rule 1: 2 columns + odd count → last widget full width.
+  Widget _buildCardsGroupTwoColumn(
+    ThemeData theme,
+    List<BuilderWidgetEntity> cards,
+  ) {
+    final int n = cards.length;
+    final bool oddLast = n.isOdd;
+    final List<Widget> rows = <Widget>[];
+    int i = 0;
+    while (i < n) {
+      if (rows.isNotEmpty) {
+        rows.add(const SizedBox(height: _kCardGridGap));
+      }
+      if (oddLast && i == n - 1) {
+        rows.add(_buildCardSection(theme, cards[i], compact: false));
+        break;
+      }
+      rows.add(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(child: _buildCardSection(theme, cards[i], compact: true)),
+            const SizedBox(width: _kCardGridGap),
+            Expanded(
+              child: _buildCardSection(theme, cards[i + 1], compact: true),
+            ),
+          ],
+        ),
+      );
+      i += 2;
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: rows,
+    );
+  }
+
+  /// Rule 2: 3 columns → last row fills remaining columns via expanded last slot.
+  Widget _buildCardsGroupThreeColumn(
+    ThemeData theme,
+    List<BuilderWidgetEntity> cards,
+  ) {
+    final int n = cards.length;
+    final int fullRows = n ~/ 3;
+    final int rem = n % 3;
+    final List<Widget> rows = <Widget>[];
+
+    for (int r = 0; r < fullRows; r++) {
+      if (rows.isNotEmpty) {
+        rows.add(const SizedBox(height: _kCardGridGap));
+      }
+      final int b = r * 3;
+      rows.add(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              flex: 1,
+              child: _buildCardSection(theme, cards[b], compact: true),
+            ),
+            const SizedBox(width: _kCardGridGap),
+            Expanded(
+              flex: 1,
+              child: _buildCardSection(theme, cards[b + 1], compact: true),
+            ),
+            const SizedBox(width: _kCardGridGap),
+            Expanded(
+              flex: 1,
+              child: _buildCardSection(theme, cards[b + 2], compact: true),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final int startLast = fullRows * 3;
+    if (rem == 0) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: rows,
+      );
+    }
+
+    rows.add(const SizedBox(height: _kCardGridGap));
+    if (rem == 1) {
+      rows.add(_buildCardSection(theme, cards[startLast], compact: false));
+    } else {
+      rows.add(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              flex: 1,
+              child: _buildCardSection(theme, cards[startLast], compact: true),
+            ),
+            const SizedBox(width: _kCardGridGap),
+            Expanded(
+              flex: 2,
+              child: _buildCardSection(
+                theme,
+                cards[startLast + 1],
+                compact: true,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: rows,
     );
   }
 

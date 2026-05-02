@@ -43,7 +43,7 @@ class SplashController extends GetxController {
 
       final bool downloaded = await checkFuture;
       await minDisplayFuture;
-      await _writeStartupSnapshotJsonFile();
+      // await _writeStartupSnapshotJsonFile();
 
       if (downloaded) {
         Get.offAllNamed<void>(AppRoutes.home);

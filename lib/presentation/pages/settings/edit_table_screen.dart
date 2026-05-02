@@ -15,6 +15,7 @@ import 'package:antwise/presentation/widgets/dropdown_column_config_body.dart';
 import 'package:antwise/presentation/widgets/formula_text_editor_field.dart';
 import 'package:antwise/presentation/widgets/guided_formula_builder.dart';
 import 'package:antwise/presentation/widgets/number_column_config_section.dart';
+import 'package:antwise/presentation/widgets/controlled_expansion_tile.dart';
 import 'package:antwise/presentation/widgets/searchable_column_type_field.dart';
 import 'package:antwise/presentation/widgets/searchable_dropdown_field.dart';
 import 'package:antwise/presentation/widgets/text_column_config_section.dart';
@@ -1059,8 +1060,15 @@ class EditTableScreen extends GetView<EditTableController> {
               : column.nameController.text.trim();
       return Card(
         margin: const EdgeInsets.only(bottom: 10),
-        child: ExpansionTile(
-          initiallyExpanded: false,
+        child: ControlledExpansionTile(
+          expanded: controller.expandedColumnId.value == column.id,
+          onExpansionChanged: (bool expanded) {
+            if (expanded) {
+              controller.expandedColumnId.value = column.id;
+            } else if (controller.expandedColumnId.value == column.id) {
+              controller.expandedColumnId.value = null;
+            }
+          },
           title: Text(
             title,
             maxLines: 1,
@@ -1081,6 +1089,7 @@ class EditTableScreen extends GetView<EditTableController> {
           ),
           childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           children: <Widget>[
+            const SizedBox(height: 8),
             TextField(
               controller: column.nameController,
               decoration: const InputDecoration(labelText: 'Column label'),

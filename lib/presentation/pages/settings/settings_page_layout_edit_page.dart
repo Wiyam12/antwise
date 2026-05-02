@@ -1,5 +1,6 @@
 import 'package:antwise/domain/entities/builder_widget_entity.dart';
 import 'package:antwise/presentation/controllers/settings_page_layout_edit_controller.dart';
+import 'package:antwise/presentation/widgets/card_widget_grid_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:reorderables/reorderables.dart';
@@ -165,8 +166,14 @@ class SettingsPageLayoutEditPage
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         const double spacing = 8;
-        final double cardWidth =
-            (constraints.maxWidth - (spacing * (perRow - 1))) / perRow;
+        final double fullWidth = constraints.maxWidth;
+        final int boundedPerRow = perRow.clamp(1, 3);
+        final List<double> slotWidths = computeCardWidgetWrapSlotWidths(
+          maxWidth: fullWidth,
+          spacing: spacing,
+          gridCount: boundedPerRow,
+          widgetCount: cards.length,
+        );
         return ReorderableWrap(
           spacing: spacing,
           runSpacing: spacing,
@@ -175,8 +182,13 @@ class SettingsPageLayoutEditPage
             controller.reorderCardsPreview(oldIndex, newIndex);
           },
           children: cards
-              .map(
-                (BuilderWidgetEntity card) => SizedBox(
+              .asMap()
+              .entries
+              .map((MapEntry<int, BuilderWidgetEntity> e) {
+                final int i = e.key;
+                final BuilderWidgetEntity card = e.value;
+                final double cardWidth = slotWidths[i];
+                return SizedBox(
                   key: ValueKey<String>(card.id),
                   width: cardWidth,
                   child: _widgetCardFrame(
@@ -185,8 +197,8 @@ class SettingsPageLayoutEditPage
                         : 'Card widget',
                     icon: Icons.dashboard_customize_outlined,
                   ),
-                ),
-              )
+                );
+              })
               .toList(growable: false),
         );
       },

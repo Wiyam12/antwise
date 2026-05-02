@@ -141,6 +141,9 @@ class CreateTableController extends GetxController
   final RxBool swipeToDelete = false.obs;
   final Rx<ProductDisplayMode> productDisplayMode = ProductDisplayMode.grid.obs;
   final RxList<ColumnDraft> columns = <ColumnDraft>[].obs;
+
+  /// At most one column [ExpansionTile] expanded at a time; set when adding a column.
+  final RxnString expandedColumnId = RxnString();
   final RxList<ReadOnlyRowDraft> readOnlyRows = <ReadOnlyRowDraft>[].obs;
   final Rx<ReadOnlyRowPopulationMode> readOnlyPopulationMode =
       ReadOnlyRowPopulationMode.manual.obs;
@@ -967,7 +970,9 @@ class CreateTableController extends GetxController
   }
 
   void addColumn() {
-    columns.add(ColumnDraft(_uuid.v4()));
+    final ColumnDraft draft = ColumnDraft(_uuid.v4());
+    columns.add(draft);
+    expandedColumnId.value = draft.id;
     _syncReadOnlyRowsWithColumns();
   }
 
@@ -994,6 +999,9 @@ class CreateTableController extends GetxController
       return;
     }
     final ColumnDraft removed = columns.removeAt(index);
+    if (expandedColumnId.value == removed.id) {
+      expandedColumnId.value = null;
+    }
     formulaFieldErrors.remove(removed.id);
     dropdownFieldErrors.remove(removed.id);
     formulaBuilderFieldErrors.removeWhere(
