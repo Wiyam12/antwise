@@ -1,3 +1,4 @@
+import 'package:antwise/presentation/bindings/ai_chat_binding.dart';
 import 'package:antwise/presentation/bindings/create_new_page_binding.dart';
 import 'package:antwise/presentation/bindings/create_page_binding.dart';
 import 'package:antwise/presentation/bindings/create_table_binding.dart';
@@ -10,6 +11,7 @@ import 'package:antwise/presentation/pages/create_page/create_new_page_screen.da
 import 'package:antwise/presentation/pages/create_page/create_page_screen.dart';
 import 'package:antwise/presentation/pages/create_page/create_table_screen.dart';
 import 'package:antwise/presentation/pages/create_page/create_widget_screen.dart';
+import 'package:antwise/presentation/pages/ai_chat_page.dart';
 import 'package:antwise/presentation/pages/download_resources_page.dart';
 import 'package:antwise/presentation/pages/home_page.dart';
 import 'package:antwise/presentation/pages/settings/settings_bottom_nav_page.dart';
@@ -41,6 +43,11 @@ class AppPages {
       name: AppRoutes.downloadResources,
       page: DownloadResourcesPage.new,
       binding: DownloadResourcesBinding(),
+    ),
+    GetPage<dynamic>(
+      name: AppRoutes.aiChat,
+      page: AiChatPage.new,
+      binding: AiChatBinding(),
     ),
     GetPage<dynamic>(
       name: AppRoutes.home,

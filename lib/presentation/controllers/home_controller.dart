@@ -165,7 +165,7 @@ class HomeController extends GetxController {
     final Box<AppSettingsHiveModel> box = Hive.box<AppSettingsHiveModel>(
       HiveBoxes.settingsBox,
     );
-    final AppSettingsHiveModel? settings = box.get(_settingsKey);
+    final AppSettingsHiveModel? settings = box.get(HiveKeys.appSettings);
     firstInstallCompleted.value = settings?.firstInstallCompleted ?? false;
     accountNames.assignAll(_sanitizeAccountNames(settings?.accountNames));
     activeAccountName.value = settings?.activeAccountName.trim() ?? '';
@@ -181,13 +181,13 @@ class HomeController extends GetxController {
     final Box<AppSettingsHiveModel> box = Hive.box<AppSettingsHiveModel>(
       HiveBoxes.settingsBox,
     );
-    final AppSettingsHiveModel? old = box.get(_settingsKey);
+    final AppSettingsHiveModel? old = box.get(HiveKeys.appSettings);
     final List<String> mergedAccounts = _mergeAccountNames(
       old?.accountNames ?? accountNames,
       accountName,
     );
     await box.put(
-      _settingsKey,
+      HiveKeys.appSettings,
       AppSettingsHiveModel(
         resourcesDownloaded: old?.resourcesDownloaded ?? false,
         themeMode: old?.themeMode ?? 'system',
@@ -229,6 +229,18 @@ class HomeController extends GetxController {
   }
 
   Future<void> applySimplePosTemplate({required String accountName}) async {
+    await _applyBundledWorkspaceTemplate(
+      assetPath: _simplePosSnapshotPath,
+      templateLabel: 'Simple POS',
+      accountName: accountName,
+    );
+  }
+
+  Future<void> _applyBundledWorkspaceTemplate({
+    required String assetPath,
+    required String templateLabel,
+    required String accountName,
+  }) async {
     if (isApplyingSetupTemplate.value) {
       return;
     }
@@ -237,7 +249,7 @@ class HomeController extends GetxController {
       final bool enableNotifications =
           await _resolveTemplateNotificationPolicy();
 
-      final String raw = await rootBundle.loadString(_simplePosSnapshotPath);
+      final String raw = await rootBundle.loadString(assetPath);
       final Map<String, dynamic> json = jsonDecode(raw) as Map<String, dynamic>;
       final List<Map<String, dynamic>> pagesRaw = _asMapList(json['pages']);
       final List<Map<String, dynamic>> tablesRaw = _asMapList(json['tables']);
@@ -442,10 +454,10 @@ class HomeController extends GetxController {
     } catch (e) {
       Get.snackbar(
         'Template',
-        'Failed to apply Simple POS template: $e',
+        'Failed to apply $templateLabel template: $e',
         snackPosition: SnackPosition.BOTTOM,
       );
-      print('Failed to apply Simple POS template: $e');
+      print('Failed to apply $templateLabel template: $e');
     } finally {
       isApplyingSetupTemplate.value = false;
     }
@@ -653,7 +665,7 @@ class HomeController extends GetxController {
     final Box<AppSettingsHiveModel> box = Hive.box<AppSettingsHiveModel>(
       HiveBoxes.settingsBox,
     );
-    final AppSettingsHiveModel? old = box.get(_settingsKey);
+    final AppSettingsHiveModel? old = box.get(HiveKeys.appSettings);
     final String currentAccountName = old?.activeAccountName.trim() ?? '';
     final Map<String, dynamic> workspaces = _asStringDynamicMap(
       old?.accountWorkspaces,
@@ -676,7 +688,7 @@ class HomeController extends GetxController {
     );
 
     await box.put(
-      _settingsKey,
+      HiveKeys.appSettings,
       AppSettingsHiveModel(
         resourcesDownloaded: old?.resourcesDownloaded ?? false,
         themeMode: old?.themeMode ?? 'system',
@@ -702,6 +714,11 @@ class HomeController extends GetxController {
 
   void openCreateNewPage() {
     Get.toNamed<void>(AppRoutes.createNewPage);
+  }
+
+  /// Opens on-device AI chat.
+  Future<void> openAiSupport() async {
+    await Get.toNamed<void>(AppRoutes.aiChat);
   }
 
   bool _isUsablePage(BuilderPageEntity p) =>
@@ -732,7 +749,6 @@ class HomeController extends GetxController {
     return child?.id;
   }
 
-  static const String _settingsKey = 'app_settings';
   static const String _simplePosSnapshotPath =
       'assets/templates/simple-pos.json';
 
@@ -764,7 +780,7 @@ class HomeController extends GetxController {
     final Box<AppSettingsHiveModel> box = Hive.box<AppSettingsHiveModel>(
       HiveBoxes.settingsBox,
     );
-    final AppSettingsHiveModel? settings = box.get(_settingsKey);
+    final AppSettingsHiveModel? settings = box.get(HiveKeys.appSettings);
     final Map<String, dynamic> workspaces = _asStringDynamicMap(
       settings?.accountWorkspaces,
     );
@@ -902,7 +918,7 @@ class HomeController extends GetxController {
     final Box<AppSettingsHiveModel> box = Hive.box<AppSettingsHiveModel>(
       HiveBoxes.settingsBox,
     );
-    final AppSettingsHiveModel? settings = box.get(_settingsKey);
+    final AppSettingsHiveModel? settings = box.get(HiveKeys.appSettings);
     final String targetAccount =
         (accountName ?? settings?.activeAccountName ?? '').trim();
     if (targetAccount.isEmpty) {

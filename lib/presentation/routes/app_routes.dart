@@ -4,6 +4,8 @@ abstract final class AppRoutes {
 
   static const String downloadResources = '/download-resources';
 
+  static const String aiChat = '/ai-chat';
+
   static const String home = '/home';
 
   static const String createPage = '/create';

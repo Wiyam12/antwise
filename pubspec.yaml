@@ -50,6 +50,9 @@ dependencies:
   flutter_svg: ^2.2.0
   flutter_local_notifications: ^19.5.0
   workmanager: ^0.7.0
+  flutter_gemma: ^0.14.5
+  flutter_dotenv: ^5.2.1
+  http: ^1.2.2
 
 dev_dependencies:
   flutter_test:
@@ -77,6 +80,7 @@ flutter:
     - assets/images/
     - assets/svg/
     - assets/templates/
+    - .env
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

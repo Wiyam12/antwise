@@ -2,66 +2,88 @@ import 'package:antwise/presentation/controllers/download_resources_controller.d
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-/// Mandatory resource download; back navigation is disabled until complete.
+/// Mandatory app resource download; back navigation disabled while busy.
 class DownloadResourcesPage extends GetView<DownloadResourcesController> {
   const DownloadResourcesPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return PopScope(
-      canPop: false,
-      child: Scaffold(
-        appBar: AppBar(
-          automaticallyImplyLeading: false,
-          title: const Text('Downloading resources'),
-        ),
-        body: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Obx(() {
-            final double p = controller.progress.value.clamp(0.0, 1.0);
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Text(
-                  'Required content must finish downloading before you can continue.',
-                  style: theme.textTheme.bodyLarge,
-                ),
-                const SizedBox(height: 32),
-                LinearProgressIndicator(
-                  value: p,
-                  minHeight: 10,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  controller.statusMessage.value,
-                  style: theme.textTheme.titleMedium,
-                ),
-                if (controller.errorMessage.value != null) ...<Widget>[
-                  const SizedBox(height: 24),
+    final ThemeData theme = Theme.of(context);
+    return Obx(() {
+      final bool busy = controller.isBusy.value;
+      return PopScope(
+        canPop: !busy,
+        child: Scaffold(
+          appBar: AppBar(
+            automaticallyImplyLeading: false,
+            title: const Text('Downloading resources'),
+          ),
+          body: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Obx(() {
+              final double p = controller.progress.value.clamp(0.0, 1.0);
+              final int pct = (p * 100).round().clamp(0, 100);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
                   Text(
-                    controller.errorMessage.value!,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.error,
-                    ),
+                    'Required content must finish downloading before you can '
+                    'continue.',
+                    style: theme.textTheme.bodyLarge,
                   ),
+                  const SizedBox(height: 28),
+                  LinearProgressIndicator(
+                    value: p <= 0 && busy ? null : p,
+                    minHeight: 10,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: <Widget>[
+                      Text(
+                        '$pct%',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const Spacer(),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    controller.statusMessage.value,
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  if (controller.errorMessage.value != null) ...<Widget>[
+                    const SizedBox(height: 24),
+                    Text(
+                      controller.errorMessage.value!,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.error,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: busy ? null : () => controller.retry(),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Retry'),
+                    ),
+                  ],
+                  const Spacer(),
+                  if (busy && controller.errorMessage.value == null)
+                    Text(
+                      'Please wait — you cannot go back during download.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                 ],
-                const Spacer(),
-                if (!controller.isComplete.value &&
-                    controller.errorMessage.value == null)
-                  Text(
-                    'Please wait — skipping is not available.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-              ],
-            );
-          }),
+              );
+            }),
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 }

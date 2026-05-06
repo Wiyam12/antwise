@@ -1065,6 +1065,41 @@ class CreateTableScreen extends GetView<CreateTableController> {
                         theme: theme,
                       );
                     }),
+                    const SizedBox(height: 12),
+                    Obx(() {
+                      if (controller.mode.value != TableMode.crud) {
+                        return const SizedBox.shrink();
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          CheckboxListTile(
+                            value: column.includeInCreate.value,
+                            onChanged:
+                                (bool? v) =>
+                                    column.includeInCreate.value = v ?? false,
+                            title: const Text('Include in create form'),
+                            subtitle: const Text(
+                              'Shown as read-only on the add-row form',
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                            controlAffinity: ListTileControlAffinity.leading,
+                          ),
+                          CheckboxListTile(
+                            value: column.includeInEdit.value,
+                            onChanged:
+                                (bool? v) =>
+                                    column.includeInEdit.value = v ?? false,
+                            title: const Text('Include in edit form'),
+                            subtitle: const Text(
+                              'Shown as read-only on the edit-row form',
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                            controlAffinity: ListTileControlAffinity.leading,
+                          ),
+                        ],
+                      );
+                    }),
                   ],
                 );
               }
@@ -1295,6 +1330,18 @@ class CreateTableScreen extends GetView<CreateTableController> {
                           return Text(label, style: theme.textTheme.labelLarge);
                         },
                       ),
+                      Obx(() {
+                        if (column.type.value != TableColumnType.formula) {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text(
+                            'Formula values are read-only on create and edit forms.',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        );
+                      }),
                       Obx(
                         () => CheckboxListTile(
                           value: column.includeInCreate.value,

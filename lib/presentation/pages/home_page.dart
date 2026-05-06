@@ -17,6 +17,14 @@ const double _kDrawerItemFontSize = 12;
 class HomePage extends GetView<HomeController> {
   const HomePage({super.key});
 
+  Widget _aiFab() {
+    return FloatingActionButton(
+      onPressed: () => controller.openAiSupport(),
+      tooltip: 'AI support',
+      child: const Icon(Icons.smart_toy_outlined),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Obx(() {
@@ -38,6 +46,7 @@ class HomePage extends GetView<HomeController> {
             isSetupMode: isSetupMode,
             hasExistingAccounts: hasExistingAccounts,
           ),
+          floatingActionButton: _aiFab(),
           body: const Center(child: AppLoading()),
         );
       }
@@ -49,6 +58,7 @@ class HomePage extends GetView<HomeController> {
             isSetupMode: true,
             hasExistingAccounts: hasExistingAccounts,
           ),
+          floatingActionButton: _aiFab(),
           body: _SetupModeBody(
             isApplyingTemplate: controller.isApplyingSetupTemplate.value,
             onIsAccountNameUnique: controller.isAccountNameUnique,
@@ -65,6 +75,7 @@ class HomePage extends GetView<HomeController> {
             isSetupMode: false,
             hasExistingAccounts: hasExistingAccounts,
           ),
+          floatingActionButton: _aiFab(),
           body: _EmptyBuilderBody(onCreate: controller.openCreateHub),
         );
       }
@@ -379,7 +390,7 @@ class _SetupModeSelectorState extends State<_SetupModeSelector> {
             textInputAction: TextInputAction.done,
             decoration: InputDecoration(
               labelText: 'Account Name',
-              hintText: 'POS System',
+              hintText: 'e.g. My workspace',
               errorText: _accountNameError,
               border: const OutlineInputBorder(),
             ),
@@ -390,42 +401,51 @@ class _SetupModeSelectorState extends State<_SetupModeSelector> {
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 560),
-                child: GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 1,
-                  children: <Widget>[
-                    _setupModeCard(
-                      context: context,
-                      title: 'Simple POS Template',
-                      subtitle:
-                          'Create a simple POS system from starter snapshot',
-                      svgAssetPath: 'assets/svg/pos.svg',
-                      highlighted: true,
-                      selected: _selected == _SetupModeChoice.simplePos,
-                      enabled: !widget.isApplyingTemplate,
-                      onTap:
-                          () => setState(
-                            () => _selected = _SetupModeChoice.simplePos,
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Expanded(
+                            child: _setupModeCard(
+                              context: context,
+                              title: 'Simple POS Template',
+                              subtitle:
+                                  'Create a simple POS system from starter snapshot',
+                              svgAssetPath: 'assets/svg/pos.svg',
+                              highlighted: true,
+                              selected: _selected == _SetupModeChoice.simplePos,
+                              enabled: !widget.isApplyingTemplate,
+                              onTap:
+                                  () => setState(
+                                    () =>
+                                        _selected = _SetupModeChoice.simplePos,
+                                  ),
+                            ),
                           ),
-                    ),
-                    _setupModeCard(
-                      context: context,
-                      title: 'Advance Mode',
-                      subtitle: 'Start blank and build everything manually',
-                      svgAssetPath: 'assets/svg/building-blocks.svg',
-                      highlighted: false,
-                      selected: _selected == _SetupModeChoice.advance,
-                      enabled: !widget.isApplyingTemplate,
-                      onTap:
-                          () => setState(
-                            () => _selected = _SetupModeChoice.advance,
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _setupModeCard(
+                              context: context,
+                              title: 'Advance Mode',
+                              subtitle:
+                                  'Start blank and build everything manually',
+                              svgAssetPath: 'assets/svg/building-blocks.svg',
+                              highlighted: false,
+                              selected: _selected == _SetupModeChoice.advance,
+                              enabled: !widget.isApplyingTemplate,
+                              onTap:
+                                  () => setState(
+                                    () => _selected = _SetupModeChoice.advance,
+                                  ),
+                            ),
                           ),
-                    ),
-                  ],
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -459,12 +479,17 @@ class _SetupModeSelectorState extends State<_SetupModeSelector> {
     required BuildContext context,
     required String title,
     required String subtitle,
-    required String svgAssetPath,
+    String? svgAssetPath,
+    IconData? icon,
     required bool highlighted,
     required bool selected,
     required bool enabled,
     required VoidCallback onTap,
   }) {
+    assert(
+      (svgAssetPath != null) ^ (icon != null),
+      'Provide exactly one of svgAssetPath or icon',
+    );
     final ThemeData theme = Theme.of(context);
     final Color bg =
         selected
@@ -510,7 +535,10 @@ class _SetupModeSelectorState extends State<_SetupModeSelector> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  SvgPicture.asset(svgAssetPath, width: 74, height: 74),
+                  if (svgAssetPath != null)
+                    SvgPicture.asset(svgAssetPath, width: 74, height: 74)
+                  else
+                    Icon(icon!, size: 74, color: fg),
                   const SizedBox(height: 18),
                   Text(
                     title,
@@ -550,6 +578,11 @@ class _BuilderShell extends StatelessWidget {
     final bool hasExistingAccounts = controller.accountNames.isNotEmpty;
 
     return Scaffold(
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => controller.openAiSupport(),
+        tooltip: 'AI support',
+        child: const Icon(Icons.smart_toy_outlined),
+      ),
       appBar: AppBar(
         title: Text(
           page?.name ?? AppConstants.appName,

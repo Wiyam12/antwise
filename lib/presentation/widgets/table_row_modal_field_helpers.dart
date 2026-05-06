@@ -62,7 +62,8 @@ abstract final class TableRowModalFieldValidators {
       case TableColumnType.number:
         return _validateNumber(textValue, col);
       case TableColumnType.formula:
-        return _validateFormula(textValue, col.isRequired);
+        // Computed at runtime; not edited in the row modal.
+        return null;
       case TableColumnType.dropdown:
         final String t = textValue?.trim() ?? '';
         if (col.isRequired && t.isEmpty) {
@@ -94,9 +95,6 @@ abstract final class TableRowModalFieldValidators {
         return null;
     }
   }
-
-  /// Whole numbers or decimals with at least one digit after `.` (rejects `123.`).
-  static final RegExp _strictPositiveDecimal = RegExp(r'^\d+(\.\d+)?$');
 
   static String? _validateNumber(String? raw, TableColumnEntity col) {
     final String t = raw?.trim() ?? '';
@@ -131,20 +129,4 @@ abstract final class TableRowModalFieldValidators {
     return null;
   }
 
-  static String? _validateFormula(String? raw, bool isRequired) {
-    final String t = raw?.trim() ?? '';
-    if (isRequired && t.isEmpty) {
-      return 'This field is required.';
-    }
-    if (t.isEmpty) {
-      return null;
-    }
-    if (!_strictPositiveDecimal.hasMatch(t)) {
-      return 'Invalid formula value.';
-    }
-    if (double.tryParse(t) == null) {
-      return 'Invalid formula value.';
-    }
-    return null;
-  }
 }

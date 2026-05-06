@@ -1,4 +1,5 @@
 import 'package:antwise/core/constants/app_constants.dart';
+import 'package:antwise/core/services/ai_service.dart';
 import 'package:antwise/core/services/notification_dispatcher_service.dart';
 import 'package:antwise/core/services/notification_runtime_service.dart';
 import 'package:antwise/core/storage/hive_service.dart';
@@ -7,13 +8,23 @@ import 'package:antwise/core/theme/app_theme_controller.dart';
 import 'package:antwise/presentation/bindings/initial_binding.dart';
 import 'package:antwise/presentation/routes/app_pages.dart';
 import 'package:antwise/presentation/routes/app_routes.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:get/get.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await dotenv.load(fileName: '.env');
+  } catch (e, st) {
+    debugPrint(
+      'dotenv load failed (ensure .env is in pubspec assets): $e\n$st',
+    );
+  }
   await Hive.initFlutter();
   final HiveService hiveService = HiveService();
   await hiveService.init();
@@ -23,6 +34,12 @@ Future<void> main() async {
   Get.put<HiveService>(hiveService, permanent: true);
   Get.put<SharedPreferences>(prefs, permanent: true);
   Get.put<AppThemeController>(themeController, permanent: true);
+  final AIService aiService = AIService();
+  Get.put<AIService>(aiService, permanent: true);
+  // Prime Gemma runtime after first frame so startup UI is not blocked.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(aiService.warmUpModelSession());
+  });
   NotificationDispatcherService.instance.initialize();
   await NotificationRuntimeService.ensureInitialized();
   await NotificationRuntimeService.setupBackgroundChecks();

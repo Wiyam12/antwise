@@ -1,3 +1,4 @@
+import 'package:antwise/domain/usecases/check_resources_downloaded_usecase.dart';
 import 'package:antwise/domain/usecases/download_app_resources_usecase.dart';
 import 'package:antwise/domain/usecases/mark_resources_downloaded_usecase.dart';
 import 'package:antwise/presentation/controllers/download_resources_controller.dart';
@@ -10,6 +11,7 @@ class DownloadResourcesBinding extends Bindings {
       () => DownloadResourcesController(
         Get.find<MarkResourcesDownloadedUseCase>(),
         Get.find<DownloadAppResourcesUseCase>(),
+        Get.find<CheckResourcesDownloadedUseCase>(),
       ),
     );
   }

@@ -7,7 +7,9 @@ class SplashBinding extends Bindings {
   void dependencies() {
     // Eager registration so lifecycle + navigation run reliably on first route.
     Get.put<SplashController>(
-      SplashController(Get.find<CheckResourcesDownloadedUseCase>()),
+      SplashController(
+        Get.find<CheckResourcesDownloadedUseCase>(),
+      ),
     );
   }
 }

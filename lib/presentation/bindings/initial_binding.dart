@@ -1,3 +1,4 @@
+import 'package:antwise/core/services/ai_service.dart';
 import 'package:antwise/core/storage/hive_service.dart';
 import 'package:antwise/core/services/logger_service.dart';
 import 'package:antwise/data/datasources/app_resources_local_datasource.dart';
@@ -27,12 +28,18 @@ class InitialBinding extends Bindings {
   @override
   void dependencies() {
     Get.put<LoggerService>(DebugLoggerService(), permanent: true);
+    if (!Get.isRegistered<AIService>()) {
+      Get.put<AIService>(AIService(), permanent: true);
+    }
 
     Get.lazyPut<AppResourcesLocalDataSource>(
       () => AppResourcesLocalDataSourceImpl(Get.find<SharedPreferences>()),
     );
     Get.lazyPut<AppResourcesRepository>(
-      () => AppResourcesRepositoryImpl(Get.find<AppResourcesLocalDataSource>()),
+      () => AppResourcesRepositoryImpl(
+        Get.find<AppResourcesLocalDataSource>(),
+        Get.find<AIService>(),
+      ),
     );
     Get.lazyPut<CheckResourcesDownloadedUseCase>(
       () => CheckResourcesDownloadedUseCase(Get.find<AppResourcesRepository>()),
