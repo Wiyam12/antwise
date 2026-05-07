@@ -12,8 +12,14 @@ final class AIService extends GetxService {
   static const String _logName = 'AIService';
   static const ModelType _defaultModelType = ModelType.gemmaIt;
   static const int _warmupMaxTokens = 768;
-  static const String _defaultGemmaModelUrl =
-      'https://huggingface.co/litert-community/gemma-3-270m-it/resolve/main/gemma3-270m-it-q8.task';
+
+  /// Native / desktop: LiteRT-LM bundle (see flutter_gemma example `gemma4_E2B`).
+  static const String _defaultGemmaModelUrlNative =
+      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
+
+  /// Web uses the `.task` build (`ModelFileType.task`).
+  static const String _defaultGemmaModelUrlWeb =
+      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task';
 
   /// Temperature schedule for retries when the runtime returns an empty string.
   static const List<double> _retryTemperatures = <double>[0.72, 0.38, 0.12];
@@ -22,7 +28,7 @@ final class AIService extends GetxService {
   static const String outOfScopeReply =
       "Sorry, I can only assist with this application's features.";
 
-  /// Strict in-app support scope (embedded in every user turn for `.task` models).
+  /// Strict in-app support scope (embedded  in every user turn for `.task` models).
   static const String _supportPolicyBlock = '';
 
   /// For `ModelFileType.task`, flutter_gemma forwards [Message.text] verbatim (no
@@ -719,24 +725,28 @@ final class AIService extends GetxService {
   }) async {
     _log('Installing default Gemma model');
     final String? token = _readHuggingFaceToken();
+    final String modelUrl =
+        kIsWeb ? _defaultGemmaModelUrlWeb : _defaultGemmaModelUrlNative;
+    final ModelFileType modelFileType =
+        kIsWeb ? ModelFileType.task : ModelFileType.litertlm;
     try {
-      await FlutterGemma.installModel(modelType: _defaultModelType)
-          .fromNetwork(_defaultGemmaModelUrl, token: token)
-          .withProgress((int progress) {
-            if (onProgress == null) {
-              return;
-            }
-            final int received = (progress * 10).clamp(0, 1000);
-            onProgress(received, 1000);
-          })
-          .install();
+      await FlutterGemma.installModel(
+        modelType: _defaultModelType,
+        fileType: modelFileType,
+      ).fromNetwork(modelUrl, token: token).withProgress((int progress) {
+        if (onProgress == null) {
+          return;
+        }
+        final int received = (progress * 10).clamp(0, 1000);
+        onProgress(received, 1000);
+      }).install();
     } catch (e) {
       final String message = e.toString();
       if (message.contains('401') || message.contains('restricted')) {
         throw StateError(
           'Default Gemma model download is gated on Hugging Face. '
           'Set HF_TOKEN in .env and make sure your account has access to '
-          'litert-community/gemma-3-270m-it.',
+          'litert-community/gemma-4-E2B-it-litert-lm.',
         );
       }
       rethrow;
