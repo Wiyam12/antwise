@@ -56,6 +56,10 @@ class EditTableScreen extends GetView<EditTableController> {
             physics: const NeverScrollableScrollPhysics(),
             type: StepperType.vertical,
             currentStep: boundedCurrentStep,
+            onStepTapped: (int step) {
+              FocusScope.of(context).unfocus();
+              controller.jumpToStep(step);
+            },
             stepIconHeight: 28,
             stepIconWidth: 28,
             stepIconBuilder: (int stepIndex, StepState stepState) {
@@ -814,6 +818,8 @@ class EditTableScreen extends GetView<EditTableController> {
 
   Widget _stepColumns(ThemeData theme, BuildContext context) {
     return Obx(() {
+      // Ensure this Obx always tracks at least one observable across all branches.
+      final int _ = controller.currentStep.value;
       if (controller.isSummaryTable) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,

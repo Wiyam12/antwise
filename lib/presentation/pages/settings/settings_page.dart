@@ -228,20 +228,102 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadAccountState();
   }
 
+  Future<void> _openAccountBottomSheet(BuildContext context) async {
+    final ThemeData theme = Theme.of(context);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) {
+        return SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 420,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    child: Text(
+                      'Accounts',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: _accountNames.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (_, int index) {
+                        final String accountName = _accountNames[index];
+                        final bool isActive = accountName == _activeAccountName;
+                        return _accountCard(
+                          icon: Icons.business_outlined,
+                          title: accountName,
+                          isActive: isActive,
+                          onTap: () async {
+                            if (sheetContext.mounted) {
+                              Navigator.of(sheetContext).pop();
+                            }
+                            if (!mounted) {
+                              return;
+                            }
+                            await _switchAccount(accountName);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _accountCard(
+                    icon: Icons.add_circle_outline,
+                    title: 'Create New Account',
+                    isActive: false,
+                    leadingPrefix: '+ ',
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      Get.offAllNamed<void>(
+                        AppRoutes.home,
+                        arguments: <String, dynamic>{'forceSetupMode': true},
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    _loadAccountState();
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool canDeleteActiveWorkspace = _activeAccountName.trim().isNotEmpty;
+    final String activeWorkspaceName =
+        _activeAccountName.trim().isEmpty
+            ? 'No active workspace'
+            : _activeAccountName.trim();
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-        actions: <Widget>[
-          TextButton.icon(
-            onPressed: () => _openAccountSelector(context),
-            icon: const Icon(Icons.expand_more),
-            label: const Text('Account'),
+      appBar: AppBar(title: const Text('Settings')),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: FilledButton.tonalIcon(
+            onPressed: () => _openAccountBottomSheet(context),
+            icon: const Icon(Icons.workspaces_outline),
+            label: Text('Current Workspace: $activeWorkspaceName'),
           ),
-          const SizedBox(width: 8),
-        ],
+        ),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -301,7 +383,7 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: 'Rule-based notification settings',
             onTap: () => Get.toNamed<void>(AppRoutes.settingsNotifications),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 40),
           Center(
             child: Text(
               'Danger Zone',

@@ -3,6 +3,36 @@ import 'dart:async';
 import 'package:antwise/presentation/controllers/ai_chat_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:my_animated_text/my_animated_text.dart';
+
+class NeonHeadline extends StatelessWidget {
+  const NeonHeadline(
+    this.text, {
+    super.key,
+    this.style,
+    this.mode = AnimatedTextMode.loop,
+  });
+
+  final String text;
+  final TextStyle? style;
+  final AnimatedTextMode mode;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color accent = Theme.of(context).colorScheme.primary;
+
+    return ShimmerText(
+      text,
+      mode: mode,
+      style: (style ?? const TextStyle()).copyWith(
+        shadows: <Shadow>[
+          Shadow(color: accent.withValues(alpha: 0.45), blurRadius: 8),
+          Shadow(color: accent.withValues(alpha: 0.25), blurRadius: 14),
+        ],
+      ),
+    );
+  }
+}
 
 Future<void> _sendChatMessageWithLogs(AiChatController controller) async {
   final String text = controller.inputController.text.trim();
@@ -17,8 +47,89 @@ Future<void> _sendChatMessageWithLogs(AiChatController controller) async {
   }
 }
 
-class AiChatPage extends GetView<AiChatController> {
+class AiChatPage extends StatefulWidget {
   const AiChatPage({super.key});
+
+  @override
+  State<AiChatPage> createState() => _AiChatPageState();
+}
+
+class _AiChatPageState extends State<AiChatPage> {
+  late final AiChatController controller;
+  Worker? _isGeneratingWorker;
+  Timer? _loadingMessageStage2Timer;
+  Timer? _loadingMessageStage3Timer;
+  String? _loadingMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = Get.find<AiChatController>();
+    _isGeneratingWorker = ever<bool>(
+      controller.isGenerating,
+      _handleGeneratingChanged,
+    );
+    if (controller.isGenerating.value) {
+      _startLoadingMessageCycle();
+    }
+  }
+
+  @override
+  void dispose() {
+    _isGeneratingWorker?.dispose();
+    _cancelLoadingMessageTimers();
+    super.dispose();
+  }
+
+  void _handleGeneratingChanged(bool isGenerating) {
+    if (isGenerating) {
+      _startLoadingMessageCycle();
+      return;
+    }
+
+    _cancelLoadingMessageTimers();
+    if (_loadingMessage != null && mounted) {
+      setState(() {
+        _loadingMessage = null;
+      });
+    }
+  }
+
+  void _startLoadingMessageCycle() {
+    _cancelLoadingMessageTimers();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _loadingMessage = 'Thinking...';
+    });
+
+    _loadingMessageStage2Timer = Timer(const Duration(seconds: 3), () {
+      if (!mounted || !controller.isGenerating.value) {
+        return;
+      }
+      setState(() {
+        _loadingMessage = 'Thinking may take some time...';
+      });
+    });
+
+    _loadingMessageStage3Timer = Timer(const Duration(seconds: 8), () {
+      if (!mounted || !controller.isGenerating.value) {
+        return;
+      }
+      setState(() {
+        _loadingMessage = 'Still generating response, please wait...';
+      });
+    });
+  }
+
+  void _cancelLoadingMessageTimers() {
+    _loadingMessageStage2Timer?.cancel();
+    _loadingMessageStage2Timer = null;
+    _loadingMessageStage3Timer?.cancel();
+    _loadingMessageStage3Timer = null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +186,16 @@ class AiChatPage extends GetView<AiChatController> {
                 itemBuilder: (BuildContext context, int index) {
                   final ChatMessage m = list[index];
                   final bool user = m.role == 'user';
+                  final bool isActiveLoadingBubble =
+                      !user &&
+                      m.text.isEmpty &&
+                      controller.isGenerating.value &&
+                      index == list.length - 1;
+
+                  if (!user && m.text.isEmpty && !isActiveLoadingBubble) {
+                    return const SizedBox.shrink();
+                  }
+
                   return Align(
                     alignment:
                         user ? Alignment.centerRight : Alignment.centerLeft,
@@ -94,10 +215,22 @@ class AiChatPage extends GetView<AiChatController> {
                                 : theme.colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: SelectableText(
-                        m.text.isEmpty && !user ? '…' : m.text,
-                        style: theme.textTheme.bodyMedium,
-                      ),
+                      child:
+                          isActiveLoadingBubble
+                              ? NeonHeadline(
+                                key: ValueKey<String>(
+                                  _loadingMessage ?? 'Thinking...',
+                                ),
+                                _loadingMessage ?? 'Thinking...',
+                                mode: AnimatedTextMode.loop,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              )
+                              : SelectableText(
+                                m.text,
+                                style: theme.textTheme.bodyMedium,
+                              ),
                     ),
                   );
                 },

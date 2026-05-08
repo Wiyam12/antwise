@@ -53,6 +53,7 @@ dependencies:
   flutter_gemma: ^0.14.5
   flutter_dotenv: ^5.2.1
   http: ^1.2.2
+  my_animated_text: ^2.2.0
 
 dev_dependencies:
   flutter_test:

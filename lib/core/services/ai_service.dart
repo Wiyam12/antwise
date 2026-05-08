@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
@@ -10,7 +11,7 @@ final class AIService extends GetxService {
   Future<void>? _defaultModelEnsureFuture;
 
   static const String _logName = 'AIService';
-  static const ModelType _defaultModelType = ModelType.gemmaIt;
+  static const ModelType _defaultModelType = ModelType.qwen;
   static const int _warmupMaxTokens = 768;
 
   /// Native / desktop: LiteRT-LM bundle (see flutter_gemma example `gemma4_E2B`).
@@ -29,7 +30,16 @@ final class AIService extends GetxService {
       "Sorry, I can only assist with this application's features.";
 
   /// Strict in-app support scope (embedded  in every user turn for `.task` models).
-  static const String _supportPolicyBlock = '';
+  static const String _supportPolicyBlock =
+      'You are Antwise Assistant chatbot. You help users only with Antwise app features, pages, tables, widgets, and data.'
+      'You are NOT a general assistant.'
+      'You MUST focus only on Antwise-related context and ignore unrelated questions.'
+      'You have access to the local Hive database (offline data storage).'
+      'You MUST use available Hive data to understand current app state, including tables, columns, records, and user-generated content.'
+      'If relevant data exists in Hive, use it to answer accurately instead of guessing.'
+      'If data is not available in Hive, clearly say it does not exist in the current app data.'
+      'When the user asks about data, always check Hive structure first (tables, columns, values) before responding.'
+      'Ensure all responses are consistent with the current stored application state.';
 
   /// For `ModelFileType.task`, flutter_gemma forwards [Message.text] verbatim (no
   /// automatic Gemma turn markup). IT models expect explicit turns or generation
@@ -274,6 +284,35 @@ final class AIService extends GetxService {
     return false;
   }
 
+  static bool _asksForWorkspaceCounts(String text) {
+    final String lower = text.toLowerCase();
+    final bool asksQuantity = RegExp(
+      r'\b(how many|number of|count of|total)\b',
+      caseSensitive: false,
+    ).hasMatch(lower);
+    if (!asksQuantity) {
+      return false;
+    }
+    return RegExp(
+      r'\b(table|tables|page|pages|widget|widgets|column|columns|row|rows)\b',
+      caseSensitive: false,
+    ).hasMatch(lower);
+  }
+
+  static bool _snapshotLooksEmpty(String tableOutlineSnapshot) {
+    final String outline = tableOutlineSnapshot.trim().toLowerCase();
+    if (outline.isEmpty) {
+      return true;
+    }
+    return outline == 'none' ||
+        outline == 'n/a' ||
+        outline == 'no tables' ||
+        outline == 'no table' ||
+        outline.contains('no tables found') ||
+        outline.contains('no table found') ||
+        outline.contains('no data');
+  }
+
   Future<void> initialize() {
     _initFuture ??= _initializeInternal();
     return _initFuture!;
@@ -342,6 +381,18 @@ final class AIService extends GetxService {
         _log('Canned in-scope reply', details: canned);
       }
       return canned;
+    }
+
+    if (applyIntentShortcuts &&
+        _asksForWorkspaceCounts(trimmed) &&
+        _snapshotLooksEmpty(tableOutlineSnapshot)) {
+      const String emptyDataReply =
+          'Your workspace currently has no tables/pages/widgets yet in local data. '
+          'Create one first, then I can report exact counts and details.';
+      if (logDiagnostics && kDebugMode) {
+        _log('Using empty-workspace count shortcut', details: emptyDataReply);
+      }
+      return emptyDataReply;
     }
 
     await initialize();
@@ -638,14 +689,27 @@ final class AIService extends GetxService {
 
   bool _isGenericNonAnswer(String text) {
     final String t = text.trim().toLowerCase();
-    return t == 'is there anything else i can help you with today?' ||
+    if (t == 'is there anything else i can help you with today?' ||
         t == 'is there anything else i can help you with today' ||
         t == 'how can i help you today?' ||
         t == 'how can i help you today' ||
         t == 'what would you like to do?' ||
         t == 'what would you like to do' ||
         t == 'can i help with anything else?' ||
-        t == 'can i help with anything else';
+        t == 'can i help with anything else') {
+      return true;
+    }
+
+    // Some runs emit a "deferred" placeholder instead of a real answer.
+    // Treat this as unusable so retries/fallback can continue immediately.
+    if (t.contains('please wait while i check') ||
+        t.contains('i need to look at the available database structure') ||
+        t.contains('i can check the structure') ||
+        t.contains('still checking') ||
+        t.contains('let me check first')) {
+      return true;
+    }
+    return false;
   }
 
   /// One session, one [addQueryChunk], streaming only — avoids sync-then-stream
@@ -660,12 +724,17 @@ final class AIService extends GetxService {
       topK: 64,
       topP: 0.95,
     );
+    final StringBuffer buffer = StringBuffer();
     try {
       await session.addQueryChunk(Message.text(text: prompt, isUser: true));
-      final StringBuffer buffer = StringBuffer();
-      await for (final String token in session.getResponseAsync()) {
+      await for (final String token in session.getResponseAsync().timeout(
+        const Duration(seconds: 45),
+      )) {
         buffer.write(token);
       }
+      return buffer.toString().trim();
+    } on TimeoutException {
+      // Avoid indefinite waiting if the stream stalls mid-generation.
       return buffer.toString().trim();
     } finally {
       await session.close();

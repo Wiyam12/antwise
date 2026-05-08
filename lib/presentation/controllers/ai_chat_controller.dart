@@ -78,6 +78,16 @@ class AiChatController extends GetxController {
     _scrollToBottom();
 
     try {
+      final String? directDataReply = AiSupportTableSnapshot
+          .tryBuildAllRecordsReply(text);
+      if (directDataReply != null) {
+        messages[messages.length - 1] = ChatMessage(
+          role: 'assistant',
+          text: directDataReply,
+        );
+        messages.refresh();
+        return;
+      }
       final String outline = AiSupportTableSnapshot.tryBuild();
       final String reply = await _ai.generateResponse(
         text,

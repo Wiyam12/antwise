@@ -58,7 +58,6 @@ class HomePage extends GetView<HomeController> {
             isSetupMode: true,
             hasExistingAccounts: hasExistingAccounts,
           ),
-          floatingActionButton: _aiFab(),
           body: _SetupModeBody(
             isApplyingTemplate: controller.isApplyingSetupTemplate.value,
             onIsAccountNameUnique: controller.isAccountNameUnique,

@@ -2083,6 +2083,14 @@ class EditTableController extends GetxController implements GuidedFormulaHost {
     }
   }
 
+  void jumpToStep(int step) {
+    final int boundedStep = step.clamp(0, lastStepIndex);
+    if (boundedStep == currentStep.value) {
+      return;
+    }
+    currentStep.value = boundedStep;
+  }
+
   Future<void> saveChanges() async {
     // Flush active key/focus events before mutating view state/navigation.
     FocusManager.instance.primaryFocus?.unfocus();

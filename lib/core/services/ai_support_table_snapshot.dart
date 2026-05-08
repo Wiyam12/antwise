@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:antwise/core/storage/hive_boxes.dart';
+import 'package:antwise/data/models/hive/table_row_hive_model.dart';
 import 'package:antwise/data/models/hive/table_schema_hive_model.dart';
 import 'package:hive/hive.dart';
 
@@ -62,6 +65,107 @@ abstract final class AiSupportTableSnapshot {
       return out.toString().trimRight();
     } catch (_) {
       return '';
+    }
+  }
+
+  static final RegExp _allRecordsQuery = RegExp(
+    r'\ball\s+records\s+(?:in|of|from)\s+(?:the\s+)?["`]?([^"`]+?)["`]?\s*(?:table)?\s*$',
+    caseSensitive: false,
+  );
+
+  /// Deterministic reply for queries like:
+  /// "all records in transactions table".
+  /// Returns null when the message is not a supported direct-data query.
+  static String? tryBuildAllRecordsReply(String userMessage) {
+    final String trimmed = userMessage.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+
+    final RegExpMatch? match = _allRecordsQuery.firstMatch(trimmed);
+    if (match == null) {
+      return null;
+    }
+
+    final String rawTableName = (match.group(1) ?? '').trim();
+    final String queryTableName =
+        rawTableName
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .replaceAll(RegExp(r'\btable\b$', caseSensitive: false), '')
+            .trim();
+    if (queryTableName.isEmpty) {
+      return null;
+    }
+
+    try {
+      if (!Hive.isBoxOpen(HiveBoxes.tablesBox)) {
+        return 'I cannot read tables right now because local table storage is not available.';
+      }
+      final List<TableSchemaHiveModel> tables = Hive.box<TableSchemaHiveModel>(
+        HiveBoxes.tablesBox,
+      ).values.toList(growable: false);
+      if (tables.isEmpty) {
+        return 'There are no tables in your workspace yet.';
+      }
+
+      final String lookup = queryTableName.toLowerCase();
+      TableSchemaHiveModel? target;
+      for (final TableSchemaHiveModel table in tables) {
+        if (table.name.trim().toLowerCase() == lookup) {
+          target = table;
+          break;
+        }
+      }
+      if (target == null) {
+        return 'I could not find a table named "$queryTableName".';
+      }
+
+      if (!Hive.isBoxOpen(HiveBoxes.rowsBox)) {
+        return 'I found "${target.name}" but local row storage is not available right now.';
+      }
+
+      final List<TableRowHiveModel> rows = Hive.box<TableRowHiveModel>(
+            HiveBoxes.rowsBox,
+          ).values
+          .where((TableRowHiveModel row) => row.tableId == target!.id)
+          .toList(growable: false);
+
+      if (rows.isEmpty) {
+        return 'The "${target.name}" table currently has no records.';
+      }
+
+      final Map<String, String> columnNamesById = <String, String>{};
+      for (final Map<String, dynamic> raw in target.columns) {
+        final String id = (raw['id'] ?? '').toString().trim();
+        final String name = (raw['name'] ?? '').toString().trim();
+        if (id.isNotEmpty) {
+          columnNamesById[id] = name.isEmpty ? id : name;
+        }
+      }
+
+      const int maxRows = 80;
+      final int shownCount = rows.length > maxRows ? maxRows : rows.length;
+      final List<Map<String, dynamic>> payload = <Map<String, dynamic>>[];
+      for (int i = 0; i < shownCount; i++) {
+        final TableRowHiveModel row = rows[i];
+        final Map<String, dynamic> rowMap = <String, dynamic>{};
+        row.values.forEach((String columnId, dynamic value) {
+          final String label = columnNamesById[columnId] ?? columnId;
+          rowMap[label] = value;
+        });
+        payload.add(rowMap);
+      }
+
+      final String jsonBody = const JsonEncoder.withIndent(
+        '  ',
+      ).convert(payload);
+      if (rows.length > maxRows) {
+        return 'Showing $shownCount of ${rows.length} records from "${target.name}":\n$jsonBody\n'
+            '... ${rows.length - maxRows} more record(s) not shown.';
+      }
+      return 'All ${rows.length} record(s) from "${target.name}":\n$jsonBody';
+    } catch (_) {
+      return 'I could not read records for "$queryTableName" right now.';
     }
   }
 }

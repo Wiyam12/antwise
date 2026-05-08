@@ -1696,35 +1696,36 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                                       ],
                                     );
                                   })(),
-                                TableColumnType.formula =>
-                                  InputDecorator(
-                                    decoration: InputDecoration(
-                                      labelText: col.name,
-                                      helperText: 'Calculated (read-only)',
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(4),
-                                        borderSide: BorderSide(
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.outline,
-                                        ),
-                                      ),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 10,
-                                      ),
-                                      child: Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: Text(
-                                          formulaColumnDisplayText(col),
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.bodyLarge,
-                                        ),
+                                TableColumnType.formula => InputDecorator(
+                                  decoration: InputDecoration(
+                                    labelText: col.name,
+                                    helperText: 'Calculated (read-only)',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(4),
+                                      borderSide: BorderSide(
+                                        color:
+                                            Theme.of(
+                                              context,
+                                            ).colorScheme.outline,
                                       ),
                                     ),
                                   ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 10,
+                                    ),
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Text(
+                                        formulaColumnDisplayText(col),
+                                        style:
+                                            Theme.of(
+                                              context,
+                                            ).textTheme.bodyLarge,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                                 TableColumnType.text =>
                                   (() {
                                     final bool isPwd =
@@ -2871,26 +2872,31 @@ class _DynamicBuilderPageBodyState extends State<DynamicBuilderPageBody> {
                   ),
                 ),
               if (canUseDateGrouping) ...<Widget>[
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: enabledDateFilters
-                      .map((_ChartDateGrouping grouping) {
-                        return ChoiceChip(
-                          label: Text(_dateGroupingLabel(grouping)),
-                          selected: activeDateGrouping == grouping,
-                          onSelected: (bool selected) {
-                            if (!selected) {
-                              return;
-                            }
-                            setState(() {
-                              _selectedDateGroupingByChartId[chartWidget.id] =
-                                  grouping;
-                            });
-                          },
-                        );
-                      })
-                      .toList(growable: false),
+                MediaQuery(
+                  data: MediaQuery.of(
+                    context,
+                  ).copyWith(textScaler: TextScaler.linear(0.8)),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: enabledDateFilters
+                        .map((_ChartDateGrouping grouping) {
+                          return ChoiceChip(
+                            label: Text(_dateGroupingLabel(grouping)),
+                            selected: activeDateGrouping == grouping,
+                            onSelected: (bool selected) {
+                              if (!selected) {
+                                return;
+                              }
+                              setState(() {
+                                _selectedDateGroupingByChartId[chartWidget.id] =
+                                    grouping;
+                              });
+                            },
+                          );
+                        })
+                        .toList(growable: false),
+                  ),
                 ),
                 const SizedBox(height: 10),
               ],
