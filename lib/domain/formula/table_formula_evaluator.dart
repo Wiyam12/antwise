@@ -541,6 +541,10 @@ class _EvalParser {
         return _parseCountIfArgs();
       case 'TODAY':
         return _parseTodayArgs();
+      case 'DATE_ADD':
+        return _parseDateAddArgs();
+      case 'DAYS_AGO':
+        return _parseDaysAgoArgs();
       default:
         throw FormatException('fn');
     }
@@ -550,11 +554,35 @@ class _EvalParser {
     if (!_match(_Tk.rpar)) {
       throw FormatException(')');
     }
-    final DateTime now = DateTime.now();
-    final String yyyy = now.year.toString().padLeft(4, '0');
-    final String mm = now.month.toString().padLeft(2, '0');
-    final String dd = now.day.toString().padLeft(2, '0');
-    return '$yyyy-$mm-$dd';
+    return _isoDateOnly(DateTime.now());
+  }
+
+  String _parseDateAddArgs() {
+    final dynamic dateVal = parseExpression();
+    if (!_match(_Tk.comma)) {
+      throw FormatException(',');
+    }
+    final dynamic offsetVal = parseExpression();
+    if (!_match(_Tk.rpar)) {
+      throw FormatException(')');
+    }
+    final DateTime? base = _coerceToDateOnly(dateVal);
+    if (base == null) {
+      return '';
+    }
+    final int offsetDays = _toNum(offsetVal).round();
+    return _isoDateOnly(base.add(Duration(days: offsetDays)));
+  }
+
+  String _parseDaysAgoArgs() {
+    final dynamic daysVal = parseExpression();
+    if (!_match(_Tk.rpar)) {
+      throw FormatException(')');
+    }
+    final int days = _toNum(daysVal).round().clamp(0, 99999);
+    final DateTime today = DateTime.now();
+    final DateTime midnight = DateTime(today.year, today.month, today.day);
+    return _isoDateOnly(midnight.subtract(Duration(days: days)));
   }
 
   dynamic _parseLookupArgs() {
@@ -1088,6 +1116,17 @@ dynamic _numBin(
   num Function(num a, num b) fn,
 ) {
   return fn(_toNum(left), _toNum(right));
+}
+
+String _isoDateOnly(DateTime d) {
+  final String yyyy = d.year.toString().padLeft(4, '0');
+  final String mm = d.month.toString().padLeft(2, '0');
+  final String dd = d.day.toString().padLeft(2, '0');
+  return '$yyyy-$mm-$dd';
+}
+
+DateTime? _coerceToDateOnly(dynamic value) {
+  return _tryParseDateOnlyComparable(TableFormulaEvaluator._stringify(value));
 }
 
 DateTime? _tryParseDateOnlyComparable(String raw) {

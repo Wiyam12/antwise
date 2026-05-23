@@ -26,7 +26,7 @@ class AppResourcesRepositoryImpl implements AppResourcesRepository {
     }
     await _aiService.downloadModel(
       onProgress: (int received, int? total) {
-        final int safeTotal = (total == null || total <= 0) ? 1 : total;
+        final int safeTotal = (total == null || total <= 0) ? 100 : total;
         final double ratio =
             (received / safeTotal).clamp(0.0, 1.0).toDouble();
         onProgress(ratio);

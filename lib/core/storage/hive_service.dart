@@ -1,4 +1,6 @@
 import 'package:antwise/core/storage/hive_boxes.dart';
+import 'package:antwise/data/models/hive/ai_chat_message_hive_model.dart';
+import 'package:antwise/data/models/hive/ai_chat_session_hive_model.dart';
 import 'package:antwise/data/models/hive/app_settings_hive_model.dart';
 import 'package:antwise/data/models/hive/builder_page_hive_model.dart';
 import 'package:antwise/data/models/hive/builder_widget_hive_model.dart';
@@ -50,6 +52,12 @@ class HiveService {
     if (!Hive.isAdapterRegistered(6)) {
       Hive.registerAdapter(NavigationConfigHiveModelAdapter());
     }
+    if (!Hive.isAdapterRegistered(7)) {
+      Hive.registerAdapter(AiChatMessageHiveModelAdapter());
+    }
+    if (!Hive.isAdapterRegistered(8)) {
+      Hive.registerAdapter(AiChatSessionHiveModelAdapter());
+    }
   }
 
   Future<void> _openBoxes() async {
@@ -70,6 +78,9 @@ class HiveService {
     }
     if (!Hive.isBoxOpen(HiveBoxes.settingsBox)) {
       await Hive.openBox<AppSettingsHiveModel>(HiveBoxes.settingsBox);
+    }
+    if (!Hive.isBoxOpen(HiveBoxes.aiChatHistoryBox)) {
+      await Hive.openBox<AiChatSessionHiveModel>(HiveBoxes.aiChatHistoryBox);
     }
   }
 }

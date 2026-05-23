@@ -1,316 +1,142 @@
 import 'dart:async';
 import 'dart:developer' as developer;
 
+import 'package:antwise/core/services/ai/ai_build_action_parser.dart';
+import 'package:antwise/core/services/ai/ai_build_plan.dart';
+import 'package:antwise/core/services/ai/ai_build_plan_parser.dart';
+import 'package:antwise/core/services/ai/ai_build_planner_prompt.dart';
+import 'package:antwise/core/services/ai/ai_build_prompt.dart';
+import 'package:antwise/core/services/ai/ai_build_workspace_snapshot.dart';
+import 'package:antwise/core/services/ai/ai_formula_processor.dart';
+import 'package:antwise/core/services/ai/ai_hive_json_extractor.dart';
+import 'package:antwise/core/services/ai/ai_prompt_builder.dart';
+import 'package:antwise/core/services/ai/ai_prompt_paraphraser.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_gemma/core/extensions.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:get/get.dart';
+
+/// Thrown when [AIService.stopGeneration] interrupts an in-flight inference.
+final class AiGenerationCancelledException implements Exception {
+  const AiGenerationCancelledException();
+}
 
 final class AIService extends GetxService {
   Future<void>? _initFuture;
   Future<void>? _defaultModelEnsureFuture;
 
+  /// Latest install progress sink (e.g. download screen). Shared with in-flight
+  /// installs started by [warmUpModelSession] so UI updates are not dropped.
+  void Function(int received, int? total)? _installProgressReporter;
+
+  bool _generationCancelRequested = false;
+  InferenceModelSession? _activeInferenceSession;
+
+  /// Serializes every native LiteRT/MediaPipe turn (paraphrase, ask, build).
+  /// The platform rejects overlapping `createSession` / `generate` calls with
+  /// "Previous invocation still processing" if a prior session was cancelled
+  /// but not fully torn down yet.
+  Future<void> _exclusiveInferenceChain = Future<void>.value();
+
   static const String _logName = 'AIService';
-  static const ModelType _defaultModelType = ModelType.qwen;
+  static const ModelType _defaultModelType = ModelType.deepSeek;
   static const int _warmupMaxTokens = 768;
 
-  /// Native / desktop: LiteRT-LM bundle (see flutter_gemma example `gemma4_E2B`).
-  static const String _defaultGemmaModelUrlNative =
-      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
-
-  /// Web uses the `.task` build (`ModelFileType.task`).
-  static const String _defaultGemmaModelUrlWeb =
-      'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task';
+  /// [DeepSeek R1 Distill Qwen 1.5B](https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B)
+  /// multi-prefill `.task` build (~1.86 GB).
+  static const String _defaultDeepSeekModelUrl =
+      'https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv1280.task';
+  static const String _defaultModelFilename =
+      'DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv1280.task';
 
   /// Temperature schedule for retries when the runtime returns an empty string.
-  static const List<double> _retryTemperatures = <double>[0.72, 0.38, 0.12];
+  static const List<double> _retryTemperatures = <double>[0.6, 0.38, 0.12];
 
-  /// Shown when the user asks for anything outside Antwise usage (model must match).
-  static const String outOfScopeReply =
-      "Sorry, I can only assist with this application's features.";
+  /// Build mode: low temperature reduces R1 "thinking aloud" before JSON.
+  static const List<double> _buildTemperatures = <double>[0.22, 0.1];
 
-  /// Strict in-app support scope (embedded  in every user turn for `.task` models).
-  static const String _supportPolicyBlock =
-      'You are Antwise Assistant chatbot. You help users only with Antwise app features, pages, tables, widgets, and data.'
-      'You are NOT a general assistant.'
-      'You MUST focus only on Antwise-related context and ignore unrelated questions.'
-      'You have access to the local Hive database (offline data storage).'
-      'You MUST use available Hive data to understand current app state, including tables, columns, records, and user-generated content.'
-      'If relevant data exists in Hive, use it to answer accurately instead of guessing.'
-      'If data is not available in Hive, clearly say it does not exist in the current app data.'
-      'When the user asks about data, always check Hive structure first (tables, columns, values) before responding.'
-      'Ensure all responses are consistent with the current stored application state.';
+  /// Planner stage: even lower temperature — we want a short deterministic
+  /// list of steps, not creative prose.
+  static const double _plannerTemperature = 0.12;
 
-  /// For `ModelFileType.task`, flutter_gemma forwards [Message.text] verbatim (no
-  /// automatic Gemma turn markup). IT models expect explicit turns or generation
-  /// can be empty or unstable.
-  static String _gemmaTaskChatPrompt(String userContent) {
-    const String startTurn = '<start_of_turn>';
-    const String endTurn = '<end_of_turn>';
-    const String userRole = 'user';
-    const String modelRole = 'model';
-    final String body =
-        '$_supportPolicyBlock\n---\nUser message:\n$userContent';
-    return '$startTurn$userRole\n$body$endTurn\n$startTurn$modelRole\n';
+  /// Planner runs with a tight max-token budget so the on-device session
+  /// reserves more output room for the builder stage's actions JSON.
+  static const int _plannerMaxTokens = 768;
+
+  static const ModelFileType _defaultModelFileType = ModelFileType.task;
+
+  static String _cleanModelOutput(String raw) {
+    String cleaned = ModelThinkingFilter.cleanResponse(
+      raw,
+      isThinking: false,
+      modelType: _defaultModelType,
+      fileType: _defaultModelFileType,
+    );
+    if (_defaultModelType == ModelType.deepSeek) {
+      cleaned = _stripDeepSeekThinking(cleaned);
+    }
+    cleaned = _stripMetaReasoning(cleaned);
+    return cleaned.trim();
   }
 
-  /// Minimal turn markup for warm-up probes only.
-  static String _gemmaWarmupPrompt(String userContent) {
-    const String startTurn = '<start_of_turn>';
-    const String endTurn = '<end_of_turn>';
-    return '$startTurn'
-        'user\n'
-        '$userContent'
-        '$endTurn\n'
-        '$startTurn'
-        'model\n';
+  /// DeepSeek may emit reasoning before a lone closing thinking tag (no opener).
+  static String _stripDeepSeekThinking(String text) {
+    const String tagName = 'redacted_thinking';
+    final String endTag = '</$tagName>';
+    final String startTag = '<$tagName>';
+    final int endIdx = text.indexOf(endTag);
+    if (endIdx >= 0) {
+      text = text.substring(endIdx + endTag.length);
+    }
+    return text
+        .replaceAll(
+          RegExp(
+            '${RegExp.escape(startTag)}.*?${RegExp.escape(endTag)}',
+            dotAll: true,
+          ),
+          '',
+        )
+        .trim();
   }
 
-  static String _buildInScopeRetryPrompt(String userContent) {
-    return '$userContent\n\n'
-        'Important clarification: The user is asking about Antwise app usage '
-        'and formula features (including examples tied to their workspace '
-        'tables when listed). This is in scope. Answer directly with Antwise '
-        'behavior and concrete TableName.ColumnName examples when helpful '
-        'instead of refusing.';
+  void _logPrePrompt(String fullPrompt) {
+    if (!kDebugMode) {
+      return;
+    }
+    developer.log(
+      'Pre-prompt (${fullPrompt.length} chars):\n$fullPrompt',
+      name: _logName,
+    );
   }
 
-  static bool _asksAboutIfFormula(String text) {
-    return RegExp(r'\bIF\s*\(', caseSensitive: false).hasMatch(text);
+  void _logResponse(String response) {
+    if (!kDebugMode) {
+      return;
+    }
+    developer.log(
+      'Response (${response.length} chars):\n$response',
+      name: _logName,
+    );
   }
 
-  /// Small models sometimes stall on `IF()` (English "if" collision). Disambiguate in-prompt only.
-  static String _expandFormulaKeywordAmbiguity(String trimmedUserMessage) {
-    if (!_asksAboutIfFormula(trimmedUserMessage)) {
-      return trimmedUserMessage;
+  void _logParaphrase({
+    required String original,
+    required String local,
+    required String modelRaw,
+    required String result,
+  }) {
+    if (!kDebugMode) {
+      return;
     }
-    return '$trimmedUserMessage\n'
-        '(Assistant note: IF(...) here means the Antwise formula function '
-        'IF(condition, valueIfTrue, valueIfFalse), not the English word "if".)';
-  }
-
-  /// Last-chance paraphrase when IF questions decode as empty across temperatures.
-  static String _ifFormulaAnswerSeed(String originalUserMessage) {
-    return 'Answer briefly for Antwise support.\n'
-        'User asked: ${originalUserMessage.trim()}\n'
-        'Explain the formula IF(condition, valueIfTrue, valueIfFalse) used in '
-        'Antwise table formula columns: what each argument is and how it picks '
-        'a result. Mention that expressions use Table.column references like '
-        'other formula functions.';
-  }
-
-  /// When the model refuses or stalls on "give me an example" style formula asks.
-  static String _formulaExampleAnswerSeed(
-    String originalUserMessage,
-    String tableOutlineSnapshot,
-  ) {
-    final String trimmed = originalUserMessage.trim();
-    final String outline = tableOutlineSnapshot.trim();
-    final StringBuffer b =
-        StringBuffer()
-          ..writeln('Answer briefly for Antwise support.')
-          ..writeln('User asked: $trimmed')
-          ..writeln(
-            'Give one or two concrete formula examples in Antwise syntax: '
-            'TableName.ColumnName, or "Table Name".Column when the table name '
-            'has spaces. Mention what AVG(...) averages (numeric column refs / '
-            'values in this app).',
-          );
-    if (outline.isNotEmpty) {
-      b.writeln(
-        'Prefer names from this workspace outline when sensible:\n$outline',
-      );
-    }
-    return b.toString();
-  }
-
-  static bool _wantsFormulaExample(String trimmedUserMessage) {
-    final String lower = trimmedUserMessage.toLowerCase();
-    if (!RegExp(
-      r'\b(example|examples|sample|samples|based on|using my|my existing|my tables|existing tables)\b',
-      caseSensitive: false,
-    ).hasMatch(lower)) {
-      return false;
-    }
-    return _mentionsAntwiseFormulaFn(trimmedUserMessage) ||
-        RegExp(
-          r'\b(formulas?|functions?)\b',
-          caseSensitive: false,
-        ).hasMatch(lower);
-  }
-
-  /// Detects formula-function topics even when the user writes "AVG formula" without ().
-  static bool _mentionsAntwiseFormulaFn(String q) {
-    if (_formulaFnInQuestion.hasMatch(q)) {
-      return true;
-    }
-    final String lower = q.toLowerCase();
-    if (RegExp(
-          r'\b(example|examples|sample|samples)\b',
-          caseSensitive: false,
-        ).hasMatch(lower) &&
-        RegExp(
-          r'\b(countif|count|avg|sum|if|lookup|today)\b',
-          caseSensitive: false,
-        ).hasMatch(lower)) {
-      return true;
-    }
-    if (!RegExp(r'\b(formulas?|functions?)\b').hasMatch(lower)) {
-      return false;
-    }
-    return RegExp(
-      r'\b(countif|count|avg|sum|if|lookup|today)\b',
-      caseSensitive: false,
-    ).hasMatch(lower);
-  }
-
-  /// Stops the model from treating "examples from my tables" as out-of-scope.
-  static String _expandFormulaExampleIntent(String trimmedUserMessage) {
-    final String lower = trimmedUserMessage.toLowerCase();
-    final bool wantsConcrete = RegExp(
-      r'\b(example|examples|sample|samples|based on|using my|my existing|my tables|existing tables)\b',
-      caseSensitive: false,
-    ).hasMatch(lower);
-    if (!wantsConcrete) {
-      return trimmedUserMessage;
-    }
-    if (!_mentionsAntwiseFormulaFn(trimmedUserMessage) &&
-        !RegExp(
-          r'\b(formulas?|functions?)\b',
-          caseSensitive: false,
-        ).hasMatch(lower)) {
-      return trimmedUserMessage;
-    }
-    return '$trimmedUserMessage\n'
-        '(Assistant note: The user wants Antwise formula examples. Workspace '
-        'table/column names below are in-app configuration — sample AVG/SUM/'
-        'COUNT/IF expressions using them are in-scope support. Answer; do not '
-        'refuse.)';
-  }
-
-  static String _composeUserPayload(
-    String trimmedUserMessage,
-    String tableOutlineSnapshot,
-  ) {
-    String x = _expandFormulaKeywordAmbiguity(trimmedUserMessage);
-    x = _expandFormulaExampleIntent(x);
-    final String outline = tableOutlineSnapshot.trim();
-    if (outline.isEmpty) {
-      return x;
-    }
-    return '$x\n\n'
-        '---\n'
-        'Workspace tables (for realistic formula examples; references use '
-        'TableName.ColumnName, or "Table Name".Column when the table name has '
-        'spaces):\n'
-        '$outline';
-  }
-
-  /// Short social/messages that must stay in-scope without relying on the model.
-  static String? _cannedSocialReply(String trimmed) {
-    final String lower = trimmed.toLowerCase();
-    if (trimmed.length > 64) {
-      return null;
-    }
-    if (RegExp(
-          r'^(hi+|hello|hey|howdy|yo|sup)(\s+(there|everyone|team))?\s*[!.…]*$',
-          caseSensitive: false,
-        ).hasMatch(lower) ||
-        RegExp(
-          r'^good\s+(morning|afternoon|evening)\b',
-          caseSensitive: false,
-        ).hasMatch(lower)) {
-      return 'Hello! I help only with Antwise — navigation, pages, tables, '
-          'settings, workspaces, and in-app troubleshooting. What would you '
-          'like to do?';
-    }
-    if (RegExp(
-      r'^(thanks?|thank\s+you|thx)\s*[!.]*$',
-      caseSensitive: false,
-    ).hasMatch(lower)) {
-      return 'You are welcome. Ask any time about using Antwise.';
-    }
-    if (RegExp(
-      r'^(bye|goodbye|cya|see\s+you)(\s+later)?\s*[!.]*$',
-      caseSensitive: false,
-    ).hasMatch(lower)) {
-      return 'Goodbye. Come back if you need help with Antwise.';
-    }
-    if (RegExp(
-          r'^what\s+(can\s+you\s+do|do\s+you\s+do)(\s+here)?\s*\??$',
-          caseSensitive: false,
-        ).hasMatch(lower) ||
-        RegExp(
-          r'^how\s+can\s+you\s+help\s*\??$',
-          caseSensitive: false,
-        ).hasMatch(lower)) {
-      return 'I help only with Antwise: moving around the app, builder pages, '
-          'tables and data, settings, workspaces, downloads, and notifications. '
-          'What are you trying to do?';
-    }
-    return null;
-  }
-
-  /// User messages that are clearly about Antwise features (model refusal should be ignored).
-  static bool _isAntwiseConceptOrFeatureQuestion(String trimmed) {
-    final String lower = trimmed.toLowerCase();
-    if (RegExp(r'\bformulas?\b').hasMatch(lower)) {
-      return true;
-    }
-    if (RegExp(
-      r'\b(table|tables|column|columns|row|rows)\b',
-      caseSensitive: false,
-    ).hasMatch(lower)) {
-      return true;
-    }
-    if (RegExp(
-      r'\b(inventory|stock|deduct|deduction|affecting|validation\s+rule)\b',
-      caseSensitive: false,
-    ).hasMatch(lower)) {
-      return true;
-    }
-    if (RegExp(
-      r'\b(workspace|navigation|settings|builder|notification)\b',
-      caseSensitive: false,
-    ).hasMatch(lower)) {
-      return true;
-    }
-    if (RegExp(
-      r'\b(IF|SUM|COUNT|AVG|COUNTIF|LOOKUP|TODAY)\s*\(',
-      caseSensitive: false,
-    ).hasMatch(trimmed)) {
-      return true;
-    }
-    return false;
-  }
-
-  static bool _asksForWorkspaceCounts(String text) {
-    final String lower = text.toLowerCase();
-    final bool asksQuantity = RegExp(
-      r'\b(how many|number of|count of|total)\b',
-      caseSensitive: false,
-    ).hasMatch(lower);
-    if (!asksQuantity) {
-      return false;
-    }
-    return RegExp(
-      r'\b(table|tables|page|pages|widget|widgets|column|columns|row|rows)\b',
-      caseSensitive: false,
-    ).hasMatch(lower);
-  }
-
-  static bool _snapshotLooksEmpty(String tableOutlineSnapshot) {
-    final String outline = tableOutlineSnapshot.trim().toLowerCase();
-    if (outline.isEmpty) {
-      return true;
-    }
-    return outline == 'none' ||
-        outline == 'n/a' ||
-        outline == 'no tables' ||
-        outline == 'no table' ||
-        outline.contains('no tables found') ||
-        outline.contains('no table found') ||
-        outline.contains('no data');
+    developer.log(
+      'Paraphrase:\n'
+      'Original: $original\n'
+      'Local: $local\n'
+      'Model raw (${modelRaw.length} chars): $modelRaw\n'
+      'Result: $result',
+      name: _logName,
+    );
   }
 
   Future<void> initialize() {
@@ -318,38 +144,87 @@ final class AIService extends GetxService {
     return _initFuture!;
   }
 
+  /// Runs [body] after any in-flight inference (including cancel teardown) has
+  /// finished. Use this to wrap a full user turn (paraphrase + reply).
+  Future<T> withExclusiveInference<T>(Future<T> Function() body) async {
+    final Completer<T> result = Completer<T>();
+    _exclusiveInferenceChain = _exclusiveInferenceChain.then((_) async {
+      try {
+        result.complete(await body());
+      } catch (e, st) {
+        result.completeError(e, st);
+      }
+    });
+    return result.future;
+  }
+
+  /// Waits until the serialized inference queue is idle (prior session closed).
+  Future<void> awaitExclusiveInferenceIdle({
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
+    try {
+      await _exclusiveInferenceChain.timeout(timeout);
+    } on TimeoutException {
+      if (kDebugMode) {
+        developer.log(
+          'Timed out waiting for inference queue to drain',
+          name: _logName,
+        );
+      }
+    }
+  }
+
   Future<void> _initializeInternal() async {
     await FlutterGemma.initialize();
-    _log('Gemma initialized');
+    _log('LiteRT-LM runtime initialized');
   }
 
   Future<bool> checkModelExists() async {
     await initialize();
-    return FlutterGemma.hasActiveModel();
+    return FlutterGemma.isModelInstalled(_defaultModelFilename);
   }
 
   Future<void> downloadModel({
     required void Function(int received, int? total) onProgress,
   }) async {
-    await _ensureModelReady(onProgress: onProgress);
+    _installProgressReporter = onProgress;
+    try {
+      await _ensureModelReady();
+    } finally {
+      if (identical(_installProgressReporter, onProgress)) {
+        _installProgressReporter = null;
+      }
+    }
+  }
+
+  void _emitInstallProgress(int percent0to100) {
+    final void Function(int received, int? total)? reporter =
+        _installProgressReporter;
+    if (reporter == null) {
+      return;
+    }
+    final int pct = percent0to100.clamp(0, 100);
+    reporter(pct, 100);
   }
 
   Future<void> warmUpModelSession() async {
     try {
-      await initialize();
-      await _ensureModelReady();
-      final dynamic model = await FlutterGemma.getActiveModel(
-        maxTokens: _warmupMaxTokens,
-      );
-      try {
-        await _runStreamingInference(
-          model,
-          _gemmaWarmupPrompt('Hi'),
-          temperature: _retryTemperatures.first,
+      await withExclusiveInference(() async {
+        await initialize();
+        await _ensureModelReady();
+        final InferenceModel model = await FlutterGemma.getActiveModel(
+          maxTokens: _warmupMaxTokens,
         );
-      } finally {
-        await model.close();
-      }
+        try {
+          await _runStreamingInference(
+            model,
+            'Hi',
+            temperature: _retryTemperatures.first,
+          );
+        } finally {
+          await model.close();
+        }
+      });
     } catch (e, st) {
       developer.log(
         'AI warm-up failed: $e',
@@ -360,11 +235,221 @@ final class AIService extends GetxService {
     }
   }
 
+  /// Rewrites the user message for inference (typos, clarity). Original is kept in chat UI.
+  Future<String> paraphraseUserMessage(String userMessage) async {
+    final String trimmed = userMessage.trim();
+    if (trimmed.isEmpty) {
+      return trimmed;
+    }
+
+    final String local = AiPromptParaphraser.normalizeLocally(trimmed);
+    if (!AiPromptParaphraser.shouldRunModelParaphrase(trimmed, local)) {
+      return AiPromptParaphraser.resolveEffectivePrompt(trimmed, local);
+    }
+
+    if (_generationCancelRequested) {
+      return AiPromptParaphraser.resolveEffectivePrompt(trimmed, local);
+    }
+
+    await initialize();
+    await _ensureModelReady();
+
+    final InferenceModel model = await FlutterGemma.getActiveModel(
+      maxTokens: 256,
+    );
+    try {
+      final String raw = await _runParaphraseInference(model, local);
+      final String cleaned = AiPromptParaphraser.extractFromModelRaw(
+        _normalizeModelReply(raw),
+      );
+      final String result = AiPromptParaphraser.finalize(
+        trimmed,
+        cleaned,
+        local,
+      );
+      if (kDebugMode) {
+        _logParaphrase(
+          original: trimmed,
+          local: local,
+          modelRaw: raw,
+          result: result,
+        );
+      }
+      return result;
+    } on AiGenerationCancelledException {
+      rethrow;
+    } catch (e, st) {
+      if (kDebugMode) {
+        developer.log(
+          'Paraphrase failed; using local normalization: $e',
+          name: _logName,
+          error: e,
+          stackTrace: st,
+        );
+      }
+      return AiPromptParaphraser.resolveEffectivePrompt(trimmed, local);
+    } finally {
+      await model.close();
+    }
+  }
+
+  /// Short, blocking inference pass to rewrite the user question.
+  Future<String> _runParaphraseInference(
+    InferenceModel model,
+    String localNormalized,
+  ) async {
+    if (_generationCancelRequested) {
+      throw const AiGenerationCancelledException();
+    }
+
+    final InferenceModelSession session = await model.createSession(
+      temperature: 0.1,
+      topK: 24,
+      topP: 0.85,
+      enableThinking: false,
+      systemInstruction: AiPromptParaphraser.systemInstruction,
+    );
+    _activeInferenceSession = session;
+    try {
+      await session.addQueryChunk(
+        Message.text(
+          text: AiPromptParaphraser.buildParaphraseUserMessage(localNormalized),
+          isUser: true,
+        ),
+      );
+
+      if (_generationCancelRequested) {
+        throw const AiGenerationCancelledException();
+      }
+
+      try {
+        return await session.getResponse().timeout(const Duration(seconds: 25));
+      } on TimeoutException {
+        final StringBuffer buffer = StringBuffer();
+        await for (final String token in session.getResponseAsync().timeout(
+          const Duration(seconds: 15),
+        )) {
+          if (_generationCancelRequested) {
+            await _haltSessionGeneration(session);
+            throw const AiGenerationCancelledException();
+          }
+          if (token.isNotEmpty) {
+            buffer.write(token);
+          }
+        }
+        return buffer.toString();
+      }
+    } finally {
+      if (identical(_activeInferenceSession, session)) {
+        _activeInferenceSession = null;
+      }
+      await _closeSessionSafely(session);
+    }
+  }
+
+  /// Runs the **planner** stage of Build mode. Returns `null` when the
+  /// on-device model fails to produce a parseable plan (caller should fall
+  /// back to the monolithic builder prompt). Reuses the same exclusive
+  /// inference path as [generateResponse]'s build override.
+  Future<AiBuildPlan?> generateBuildPlan({
+    required AiBuildWorkspaceSnapshot snapshot,
+    required String paraphrasedUserMessage,
+    String? originalUserPrompt,
+    String intentLine = '',
+    String mentionsBlock = '',
+    bool logDiagnostics = true,
+  }) async {
+    if (paraphrasedUserMessage.trim().isEmpty) {
+      return null;
+    }
+    await initialize();
+    await _ensureModelReady();
+    _generationCancelRequested = false;
+
+    final String systemInstruction =
+        AiBuildPlannerPrompt.buildSystemInstruction();
+    final String userTurn = AiBuildPlannerPrompt.buildUserTurn(
+      userPrompt: paraphrasedUserMessage,
+      snapshot: snapshot,
+      intentLine: intentLine,
+      mentionsBlock: mentionsBlock,
+    );
+    final String budgetedUserTurn = AiBuildPlannerPrompt.enforceInputBudget(
+      systemInstruction: systemInstruction,
+      userTurn: userTurn,
+    );
+
+    if (logDiagnostics) {
+      _logPrePrompt(
+        AiBuildPlannerPrompt.buildLoggablePrompt(
+          userPrompt: paraphrasedUserMessage,
+          snapshot: snapshot,
+          originalUserPrompt: originalUserPrompt,
+          intentLine: intentLine,
+          mentionsBlock: mentionsBlock,
+        ),
+      );
+    }
+
+    final InferenceModel model = await FlutterGemma.getActiveModel(
+      maxTokens: _plannerMaxTokens,
+    );
+    try {
+      final String raw = await _runPlannerInferenceAttempt(
+        model,
+        systemInstruction: systemInstruction,
+        userTurn: budgetedUserTurn,
+      );
+      if (logDiagnostics) {
+        _logResponse(raw);
+      }
+      return AiBuildPlanParser.parse(raw);
+    } on AiGenerationCancelledException {
+      rethrow;
+    } catch (e, st) {
+      if (logDiagnostics && kDebugMode) {
+        developer.log(
+          'planner inference failed: $e',
+          name: _logName,
+          error: e,
+          stackTrace: st,
+        );
+      }
+      return null;
+    } finally {
+      await model.close();
+    }
+  }
+
+  Future<String> _runPlannerInferenceAttempt(
+    InferenceModel model, {
+    required String systemInstruction,
+    required String userTurn,
+  }) async {
+    final String raw = await _runStreamingInference(
+      model,
+      userTurn,
+      temperature: _plannerTemperature,
+      systemInstruction: systemInstruction,
+      rawOutput: true,
+      streamIdleTimeout: const Duration(seconds: 60),
+      assistantPrefill: kAiBuildPlanJsonPrefill,
+    );
+    return AiBuildPlanParser.mergePrefillResponse(raw);
+  }
+
   Future<String> generateResponse(
     String userMessage, {
+    String? paraphrasedUserMessage,
     bool logDiagnostics = true,
     bool applyIntentShortcuts = true,
     String tableOutlineSnapshot = '',
+    String workspaceConversationSummary = '',
+    String workspaceMentionsBlock = '',
+    String? systemInstructionOverride,
+    String? userTurnOverride,
+    String? loggablePromptOverride,
+    bool expectJson = false,
   }) async {
     final String trimmed = userMessage.trim();
     if (trimmed.isEmpty) {
@@ -375,78 +460,175 @@ final class AIService extends GetxService {
       return fb;
     }
 
-    final String? canned = _cannedSocialReply(trimmed);
-    if (canned != null) {
-      if (logDiagnostics && kDebugMode) {
-        _log('Canned in-scope reply', details: canned);
-      }
-      return canned;
-    }
-
-    if (applyIntentShortcuts &&
-        _asksForWorkspaceCounts(trimmed) &&
-        _snapshotLooksEmpty(tableOutlineSnapshot)) {
-      const String emptyDataReply =
-          'Your workspace currently has no tables/pages/widgets yet in local data. '
-          'Create one first, then I can report exact counts and details.';
-      if (logDiagnostics && kDebugMode) {
-        _log('Using empty-workspace count shortcut', details: emptyDataReply);
-      }
-      return emptyDataReply;
-    }
-
     await initialize();
     await _ensureModelReady();
+    _generationCancelRequested = false;
 
-    final String promptPayload = _composeUserPayload(
-      trimmed,
-      tableOutlineSnapshot,
-    );
-    final String prompt = _gemmaTaskChatPrompt(promptPayload);
-    if (logDiagnostics && kDebugMode) {
-      final String preview =
-          prompt.length > 480 ? '${prompt.substring(0, 480)}…' : prompt;
-      developer.log(
-        'finalPrompt len=${prompt.length} preview=$preview',
-        name: _logName,
+    String effectivePrompt =
+        (paraphrasedUserMessage ?? await paraphraseUserMessage(trimmed)).trim();
+    if (!AiPromptParaphraser.isValidParaphrase(
+      effectivePrompt,
+      original: trimmed,
+    )) {
+      effectivePrompt = AiPromptParaphraser.resolveEffectivePrompt(
+        trimmed,
+        AiPromptParaphraser.normalizeLocally(trimmed),
       );
     }
+    if (effectivePrompt.isEmpty) {
+      return _fallbackReply(trimmed);
+    }
 
-    final dynamic model = await FlutterGemma.getActiveModel(maxTokens: 1024);
+    final bool useOverridePath =
+        systemInstructionOverride != null && userTurnOverride != null;
+    // DeepSeek ekv1280 build supports up to 1280 tokens; give Build mode the
+    // full window so a long workspace context still leaves room for JSON.
+    final int maxTokens = useOverridePath ? 1280 : 1024;
+    final InferenceModel model = await FlutterGemma.getActiveModel(
+      maxTokens: maxTokens,
+    );
     try {
+      // JSON / Build-mode path: caller supplies the prompt verbatim and we
+      // bypass Ask-mode shortcuts (direct answers, reply validation, retries
+      // on "unusable" replies) so the parser can see whatever JSON the model
+      // produced.
+      if (useOverridePath) {
+        if (logDiagnostics) {
+          _logPrePrompt(
+            loggablePromptOverride ??
+                '# SYSTEM\n$systemInstructionOverride\n\n# USER TURN\n$userTurnOverride',
+          );
+        }
+        try {
+          // Use raw output so the JSON parser sees the model's exact tokens
+          // (including any `</think>` boundary). Cleaning is done by
+          // AiBuildActionParser, not by the Ask-mode meta-reasoning stripper.
+          //
+          // DeepSeek R1 is fine-tuned to "think first" before answering, so
+          // the stream sometimes idles briefly between the reasoning tail and
+          // the JSON head. Give Build mode a generous idle timeout so we
+          // actually reach the JSON instead of truncating mid-reasoning.
+          //
+          // We also prefill the assistant turn with `{"actions":[` so the
+          // model continues JSON instead of opening a long reasoning block.
+          final String budgetedUserTurn = AiBuildPrompt.enforceInputBudget(
+            systemInstruction: systemInstructionOverride,
+            userTurn: userTurnOverride,
+          );
+          String merged = await _runBuildInferenceAttempt(
+            model,
+            userTurn: budgetedUserTurn,
+            systemInstruction: systemInstructionOverride,
+            temperature: _buildTemperatures.first,
+            useJsonPrefill: true,
+          );
+          if (!AiBuildActionParser.looksLikeJson(merged) &&
+              _buildTemperatures.length > 1) {
+            if (logDiagnostics && kDebugMode) {
+              _log(
+                'Build output was not JSON; retrying with lower temperature',
+              );
+            }
+            final String strictUserTurn = AiBuildPrompt.enforceInputBudget(
+              systemInstruction: systemInstructionOverride,
+              userTurn:
+                  '${budgetedUserTurn.trim()}\n${AiBuildPrompt.kJsonOnlyOutputSuffix}',
+            );
+            merged = await _runBuildInferenceAttempt(
+              model,
+              userTurn: strictUserTurn,
+              systemInstruction: systemInstructionOverride,
+              temperature: _buildTemperatures[1],
+              useJsonPrefill: true,
+            );
+          }
+          if (logDiagnostics) {
+            _logResponse(merged);
+          }
+          return merged;
+        } on AiGenerationCancelledException {
+          rethrow;
+        } catch (e, st) {
+          if (logDiagnostics && kDebugMode) {
+            developer.log(
+              'override inference failed: $e',
+              name: _logName,
+              error: e,
+              stackTrace: st,
+            );
+          }
+          return '';
+        }
+      }
+
+      final AiFormulaProcessor formulaProcessor = AiFormulaProcessor();
+      final AiHiveContextPayload hiveContext = AiHiveJsonExtractor.build(
+        processor: formulaProcessor,
+      );
+      formulaProcessor.clearCache();
+
+      final String? directAnswer =
+          expectJson
+              ? null
+              : AiPromptBuilder.tryDirectAnswerFromContext(
+                effectivePrompt,
+                hiveContext,
+              );
+      if (directAnswer != null) {
+        if (logDiagnostics) {
+          _logPrePrompt(
+            AiPromptBuilder.buildFullPrompt(
+              userPrompt: effectivePrompt,
+              hiveContext: hiveContext,
+              tableOutlineFallback: tableOutlineSnapshot,
+              originalUserPrompt: trimmed,
+            ),
+          );
+          _logResponse(directAnswer);
+        }
+        return directAnswer;
+      }
+
+      final String fullPrompt = AiPromptBuilder.buildFullPrompt(
+        userPrompt: effectivePrompt,
+        hiveContext: hiveContext,
+        tableOutlineFallback: tableOutlineSnapshot,
+        originalUserPrompt: trimmed,
+      );
+      final String userTurn = AiPromptBuilder.buildUserTurn(
+        userPrompt: effectivePrompt,
+        hiveContext: hiveContext,
+        tableOutlineFallback: tableOutlineSnapshot,
+        workspaceMentionsBlock: workspaceMentionsBlock,
+      );
+      final String systemInstruction = AiPromptBuilder.buildSystemInstruction();
+
+      if (logDiagnostics) {
+        _logPrePrompt(fullPrompt);
+      }
+
       String response = '';
       for (var attempt = 0; attempt < _retryTemperatures.length; attempt++) {
+        if (_generationCancelRequested) {
+          throw const AiGenerationCancelledException();
+        }
         final double temp = _retryTemperatures[attempt];
         try {
           final String raw = await _runStreamingInference(
             model,
-            prompt,
+            userTurn,
             temperature: temp,
+            systemInstruction: systemInstruction,
           );
-          response = _finalizeSupportReply(raw);
-          if (_matchesOutOfScopeRefusal(response) &&
-              _isAntwiseConceptOrFeatureQuestion(trimmed)) {
-            final String retryPrompt = _gemmaTaskChatPrompt(
-              _buildInScopeRetryPrompt(
-                _composeUserPayload(trimmed, tableOutlineSnapshot),
-              ),
+          if (logDiagnostics && kDebugMode && raw.trim().isEmpty) {
+            _log(
+              'Model returned empty raw output',
+              details: 'attempt=${attempt + 1}',
             );
-            final String retryRaw = await _runStreamingInference(
-              model,
-              retryPrompt,
-              temperature: temp,
-            );
-            response = _finalizeSupportReply(retryRaw);
-            if (_matchesOutOfScopeRefusal(response)) {
-              if (logDiagnostics && kDebugMode) {
-                _log(
-                  'Model still refused in-scope question; continuing retries',
-                  details: 'attempt=${attempt + 1}',
-                );
-              }
-              response = '';
-            }
           }
+          response = _normalizeModelReply(raw);
+        } on AiGenerationCancelledException {
+          rethrow;
         } catch (e, st) {
           if (logDiagnostics && kDebugMode) {
             developer.log(
@@ -458,7 +640,7 @@ final class AIService extends GetxService {
           }
           response = '';
         }
-        if (_isUsableModelReply(response, trimmed)) {
+        if (_isUsableModelReply(response, effectivePrompt)) {
           break;
         }
         if (logDiagnostics && kDebugMode) {
@@ -470,76 +652,16 @@ final class AIService extends GetxService {
         }
       }
 
-      if (!_isUsableModelReply(response, trimmed) &&
-          _asksAboutIfFormula(trimmed)) {
-        try {
-          if (logDiagnostics && kDebugMode) {
-            _log(
-              'Trying IF-specific answer-seed prompt',
-              details: 'previous outputs unusable',
-            );
-          }
-          final String seedPrompt = _gemmaTaskChatPrompt(
-            _ifFormulaAnswerSeed(trimmed),
-          );
-          final String seedRaw = await _runStreamingInference(
-            model,
-            seedPrompt,
-            temperature: 0.55,
-          );
-          response = _finalizeSupportReply(seedRaw);
-        } catch (e, st) {
-          if (logDiagnostics && kDebugMode) {
-            developer.log(
-              'IF answer-seed inference failed: $e',
-              name: _logName,
-              error: e,
-              stackTrace: st,
-            );
-          }
-        }
-      }
-
-      if (!_isUsableModelReply(response, trimmed) &&
-          _wantsFormulaExample(trimmed)) {
-        try {
-          if (logDiagnostics && kDebugMode) {
-            _log(
-              'Trying formula-example answer-seed prompt',
-              details: 'previous outputs unusable',
-            );
-          }
-          final String seedPrompt = _gemmaTaskChatPrompt(
-            _formulaExampleAnswerSeed(trimmed, tableOutlineSnapshot),
-          );
-          final String seedRaw = await _runStreamingInference(
-            model,
-            seedPrompt,
-            temperature: 0.55,
-          );
-          response = _finalizeSupportReply(seedRaw);
-        } catch (e, st) {
-          if (logDiagnostics && kDebugMode) {
-            developer.log(
-              'Formula-example answer-seed inference failed: $e',
-              name: _logName,
-              error: e,
-              stackTrace: st,
-            );
-          }
-        }
-      }
-
-      if (_isUsableModelReply(response, trimmed)) {
-        if (logDiagnostics && kDebugMode) {
-          _log('Gemma response', details: response);
+      if (_isUsableModelReply(response, effectivePrompt)) {
+        if (logDiagnostics) {
+          _logResponse(response);
         }
         return response;
       }
 
       final String fallback = _fallbackReply(trimmed);
-      if (logDiagnostics && kDebugMode) {
-        _log('Using fallback reply (model returned empty)', details: fallback);
+      if (logDiagnostics) {
+        _logResponse(fallback);
       }
       return fallback;
     } finally {
@@ -547,31 +669,209 @@ final class AIService extends GetxService {
     }
   }
 
-  /// Normalizes refusal wording and stray punctuation to [outOfScopeReply].
-  String _finalizeSupportReply(String raw) {
-    String t = raw.trim();
+  String _normalizeModelReply(String raw) {
+    String t = _cleanModelOutput(raw);
     if ((t.startsWith('"') && t.endsWith('"')) ||
         (t.startsWith("'") && t.endsWith("'"))) {
       t = t.substring(1, t.length - 1).trim();
     }
-    if (_matchesOutOfScopeRefusal(t)) {
-      return outOfScopeReply;
-    }
     return t;
   }
 
-  bool _matchesOutOfScopeRefusal(String t) {
-    final String x = t.trim().toLowerCase();
-    final String expected = outOfScopeReply.toLowerCase();
-    if (x == expected || x == '$expected.') {
+  /// Drops planning paragraphs ("Okay, so the user is asking…", JSON search, etc.).
+  static String _stripMetaReasoning(String text) {
+    final List<String> paragraphs = text.split(RegExp(r'\n\s*\n'));
+    final List<String> kept = <String>[];
+    for (final String paragraph in paragraphs) {
+      final String trimmed = paragraph.trim();
+      if (trimmed.isEmpty) {
+        continue;
+      }
+      if (_isMetaReasoningParagraph(trimmed)) {
+        continue;
+      }
+      kept.add(_trimAnswerLeadIn(trimmed));
+    }
+    if (kept.isEmpty) {
+      return text.trim();
+    }
+    return kept.join('\n\n');
+  }
+
+  bool _looksLikeTruncatedReply(String text) {
+    final String t = text.trim();
+    if (RegExp(r'\bin the context\s*$', caseSensitive: false).hasMatch(t)) {
       return true;
     }
-    return x.startsWith(expected);
+    if (RegExp(
+      r'\b(so|and|the|with|in the)\s*$',
+      caseSensitive: false,
+    ).hasMatch(t)) {
+      return true;
+    }
+    if (t.length > 100 &&
+        !RegExp(r'[.!?]$').hasMatch(t) &&
+        RegExp(
+          r'\b(in the|let me|looking at|i need to)\b',
+          caseSensitive: false,
+        ).hasMatch(t)) {
+      return true;
+    }
+    return false;
+  }
+
+  bool _looksLikeMetaOnlyReply(String text, String userQuestion) {
+    if (AiPromptBuilder.isWorkspaceQuestion(userQuestion)) {
+      return false;
+    }
+    final String stripped = _stripMetaReasoning(text).trim();
+    if (stripped.length < 24) {
+      return true;
+    }
+    if (_looksLikeTruncatedReply(stripped)) {
+      return true;
+    }
+    return _isMetaReasoningParagraph(stripped);
+  }
+
+  static bool _isMetaReasoningParagraph(String paragraph) {
+    final String lower = paragraph.toLowerCase();
+
+    // Keep paragraphs that already contain a direct definition or answer.
+    if (RegExp(
+      r'\b(is|are|means|refers to)\s+(a|an|the)\s+\w',
+      caseSensitive: false,
+    ).hasMatch(lower)) {
+      return false;
+    }
+
+    if (RegExp(
+      r'^(okay|ok|so|hmm|well|wait|first|let me|looking at|i need to|the user is)',
+      caseSensitive: false,
+    ).hasMatch(lower)) {
+      return true;
+    }
+    if (RegExp(r'^now,\s', caseSensitive: false).hasMatch(lower) &&
+        !RegExp(r'\b(is|are|means)\b').hasMatch(lower)) {
+      return true;
+    }
+    if (lower.contains('provided json') ||
+        lower.contains('application data') ||
+        lower.contains('workspace_tables') ||
+        lower.contains('looking through') ||
+        lower.contains('let me look') ||
+        lower.contains('figure out what to say') ||
+        lower.contains('"categories"') ||
+        lower.contains('"products"')) {
+      return true;
+    }
+    return false;
+  }
+
+  static String _trimAnswerLeadIn(String paragraph) {
+    final RegExp leadIn = RegExp(
+      r'^(?:okay|ok|so|hmm|well|wait|now|first)[,.]?\s+'
+      r'(?:the user is asking[^.!?]*[.!?]\s*)?'
+      r'(?:let me[^.!?]*[.!?]\s*)?'
+      r'(?:i need to[^.!?]*[.!?]\s*)?'
+      r'(?:looking at[^.!?]*[.!?]\s*)?'
+      r'(?:now,\s*the question is about[^.!?]*[.!?]\s*)?',
+      caseSensitive: false,
+      dotAll: true,
+    );
+    final String trimmed = paragraph.trim();
+    return trimmed.replaceFirst(leadIn, '').trim().isEmpty
+        ? trimmed
+        : trimmed.replaceFirst(leadIn, '').trim();
+  }
+
+  /// Shields users from scrambled Gemma decoding (dashes/newlines/low letters).
+  bool _looksLikeDegenerateDecodedReply(String raw) {
+    final String t = raw.trim();
+    if (t.length < 60) {
+      return false;
+    }
+    final int letters = RegExp(r'[A-Za-z]').allMatches(t).length;
+    final int richWords = RegExp(r'[A-Za-z]{5,}').allMatches(t).length;
+    if (letters < 36 && (t.contains('---') || t.contains('..'))) {
+      return true;
+    }
+    final int lenDenom = t.isEmpty ? 1 : t.length;
+    final double letterRatio = letters / lenDenom;
+    if (letterRatio < 0.11 && richWords < 4) {
+      return true;
+    }
+    final int lineBreaks = '\n'.allMatches(t).length + 1;
+    if (lineBreaks >= 9 && letters < lineBreaks * 5) {
+      return true;
+    }
+    final RegExp thinLine = RegExp(r'(^[ ]*--+[ ]*$)', multiLine: true);
+    if (thinLine.allMatches(t).length >= 5 && letters < 50) {
+      return true;
+    }
+    return false;
+  }
+
+  /// Turn markers + horizontal rules from garbled decoding that mimics chat logs.
+  bool _looksLikeChatMarkupGarbage(String raw) {
+    final String t = raw.trim();
+    if (t.isEmpty) return false;
+
+    final int assistantLabels =
+        RegExp(r'\bassistant\s*:', caseSensitive: false).allMatches(t).length;
+    final int userLabels =
+        RegExp(
+          r'(^|\n)\s*user\s*:',
+          caseSensitive: false,
+          multiLine: true,
+        ).allMatches(t).length;
+
+    if (assistantLabels >= 2) {
+      return true;
+    }
+    if (RegExp(
+      r'\bassistant\s*:\s*assistant\b',
+      caseSensitive: false,
+    ).hasMatch(t)) {
+      return true;
+    }
+    final int dashedRuleLines =
+        RegExp(r'^[ \t]*-{3,}[ \t]*$', multiLine: true).allMatches(t).length;
+
+    final bool fragmentedBackticks =
+        t.contains('```') ||
+        RegExp(r'`[^`\n]+\s*based\s+on\s+the\s+`').hasMatch(t) ||
+        t.contains('``');
+
+    if (assistantLabels >= 1 &&
+        userLabels >= 1 &&
+        (dashedRuleLines >= 2 || fragmentedBackticks)) {
+      return true;
+    }
+    if (dashedRuleLines >= 8 && assistantLabels >= 1) {
+      return true;
+    }
+
+    final String lower = t.toLowerCase();
+    if (assistantLabels >= 1 &&
+        userLabels >= 1 &&
+        lower.contains('summary') &&
+        lower.contains('transaction')) {
+      return true;
+    }
+
+    return false;
   }
 
   bool _isUsableModelReply(String raw, String userQuestion) {
     final String t = raw.trim();
     if (t.isEmpty) {
+      return false;
+    }
+    if (_looksLikeDegenerateDecodedReply(t)) {
+      return false;
+    }
+    if (_looksLikeChatMarkupGarbage(t)) {
       return false;
     }
     const String placeholder = '(No response generated)';
@@ -584,81 +884,13 @@ final class AIService extends GetxService {
     if (_isEchoOfUserQuestion(t, userQuestion)) {
       return false;
     }
-    if (_userAsksFormulaExplanation(userQuestion) &&
-        (_isBareFormulaStubReply(t) || _lacksFormulaExplanationLanguage(t))) {
+    if (_looksLikeTruncatedReply(t)) {
+      return false;
+    }
+    if (_looksLikeMetaOnlyReply(t, userQuestion)) {
       return false;
     }
     return true;
-  }
-
-  /// User is asking what a formula function means / is used for.
-  static bool _userAsksFormulaExplanation(String userQuestion) {
-    final String lower = userQuestion.toLowerCase();
-    if (!_mentionsAntwiseFormulaFn(userQuestion)) {
-      return false;
-    }
-    return RegExp(
-      r'(what\s+is|what\s+does|what\s+are|how\s+does|how\s+do|explain|used?\s+for|purpose|meaning)',
-      caseSensitive: false,
-    ).hasMatch(lower);
-  }
-
-  static final RegExp _formulaFnInQuestion = RegExp(
-    r'\b(COUNTIF|COUNT|AVG|SUM|IF|LOOKUP|TODAY)\s*\(',
-    caseSensitive: false,
-  );
-
-  /// Whole reply is essentially a single FUNC(...) token (not a sentence explanation).
-  static bool _isBareFormulaStubReply(String response) {
-    final String t = response.trim();
-    if (t.isEmpty || t.length > 120) {
-      return false;
-    }
-    if (!RegExp(r'\(.*\)').hasMatch(t)) {
-      return false;
-    }
-    final List<String> parts =
-        t.split(RegExp(r'\s+')).where((String p) => p.isNotEmpty).toList();
-    if (parts.length != 1) {
-      return false;
-    }
-    final String single = parts.single;
-    return RegExp(
-      r'^[A-Za-z][A-Za-z0-9_]*\(.+\)\s*$',
-      dotAll: true,
-    ).hasMatch(single);
-  }
-
-  /// Short reply with almost no explanatory wording — typical lazy decode.
-  static bool _lacksFormulaExplanationLanguage(String response) {
-    final String t = response.trim().toLowerCase();
-    if (t.length >= 56) {
-      return false;
-    }
-    const List<String> hints = <String>[
-      'average',
-      'mean',
-      'median',
-      'sum',
-      'total',
-      'count',
-      'divide',
-      'calculat',
-      'return',
-      'used',
-      'column',
-      'table',
-      'formula',
-      'value',
-      'condition',
-      'compare',
-      'aggregate',
-      'numeric',
-      'number',
-      'rows',
-      'antwise',
-    ];
-    return !hints.any((String h) => t.contains(h));
   }
 
   static final RegExp _echoLeadingFluff = RegExp(
@@ -709,50 +941,162 @@ final class AIService extends GetxService {
         t.contains('let me check first')) {
       return true;
     }
+    if (t.contains("i'm here to provide") ||
+        t.contains('feel free to ask') ||
+        t.contains('do my best to help')) {
+      return true;
+    }
     return false;
   }
 
-  /// One session, one [addQueryChunk], streaming only — avoids sync-then-stream
-  /// double prompts seen when empty sync responses triggered a second chunk.
-  Future<String> _runStreamingInference(
-    dynamic model,
-    String prompt, {
+  Future<String> _runBuildInferenceAttempt(
+    InferenceModel model, {
+    required String userTurn,
+    required String systemInstruction,
     required double temperature,
+    required bool useJsonPrefill,
   }) async {
-    final dynamic session = await model.createSession(
+    final String raw = await _runStreamingInference(
+      model,
+      userTurn,
       temperature: temperature,
-      topK: 64,
-      topP: 0.95,
+      systemInstruction: systemInstruction,
+      rawOutput: true,
+      streamIdleTimeout: const Duration(seconds: 90),
+      assistantPrefill: useJsonPrefill ? kAiBuildJsonPrefill : null,
     );
-    final StringBuffer buffer = StringBuffer();
+    return useJsonPrefill
+        ? AiBuildActionParser.mergePrefillResponse(raw)
+        : raw;
+  }
+
+  Future<String> _runStreamingInference(
+    InferenceModel model,
+    String userMessage, {
+    required double temperature,
+    String? systemInstruction,
+    bool rawOutput = false,
+    Duration streamIdleTimeout = const Duration(seconds: 45),
+    String? assistantPrefill,
+  }) async {
+    final String? trimmedSystem = systemInstruction?.trim();
+    final bool enableThinking = false;
+    final bool useBlockingGetResponse =
+        _defaultModelType == ModelType.gemma4 &&
+        _defaultModelFileType == ModelFileType.litertlm;
+    final int sessionTopK = _defaultModelType == ModelType.deepSeek ? 40 : 64;
+    final double sessionTopP =
+        _defaultModelType == ModelType.deepSeek ? 0.7 : 0.95;
+
+    if (_generationCancelRequested) {
+      throw const AiGenerationCancelledException();
+    }
+
+    final InferenceModelSession session = await model.createSession(
+      temperature: temperature,
+      topK: sessionTopK,
+      topP: sessionTopP,
+      enableThinking: enableThinking,
+      systemInstruction:
+          trimmedSystem == null || trimmedSystem.isEmpty ? null : trimmedSystem,
+    );
+    _activeInferenceSession = session;
     try {
-      await session.addQueryChunk(Message.text(text: prompt, isUser: true));
-      await for (final String token in session.getResponseAsync().timeout(
-        const Duration(seconds: 45),
-      )) {
-        buffer.write(token);
+      await session.addQueryChunk(
+        Message.text(text: userMessage.trim(), isUser: true),
+      );
+
+      if (assistantPrefill != null && assistantPrefill.isNotEmpty) {
+        await session.addQueryChunk(
+          Message.text(text: assistantPrefill, isUser: false),
+        );
       }
-      return buffer.toString().trim();
-    } on TimeoutException {
-      // Avoid indefinite waiting if the stream stalls mid-generation.
-      return buffer.toString().trim();
+
+      if (_generationCancelRequested) {
+        throw const AiGenerationCancelledException();
+      }
+
+      if (useBlockingGetResponse) {
+        final String raw = await session.getResponse();
+        return rawOutput ? raw : _cleanModelOutput(raw);
+      }
+
+      final StringBuffer buffer = StringBuffer();
+      try {
+        await for (final String token in session.getResponseAsync().timeout(
+          streamIdleTimeout,
+        )) {
+          if (_generationCancelRequested) {
+            await _haltSessionGeneration(session);
+            throw const AiGenerationCancelledException();
+          }
+          if (token.isNotEmpty) {
+            buffer.write(token);
+          }
+        }
+      } on TimeoutException {
+        // Use partial stream output if the stream stalls.
+      }
+      if (_generationCancelRequested) {
+        await _haltSessionGeneration(session);
+        throw const AiGenerationCancelledException();
+      }
+      final String raw = buffer.toString();
+      return rawOutput ? raw : _cleanModelOutput(raw);
     } finally {
+      if (identical(_activeInferenceSession, session)) {
+        _activeInferenceSession = null;
+      }
+      await _closeSessionSafely(session);
+    }
+  }
+
+  /// Stops an in-flight generation and gives MediaPipe a moment to flip
+  /// `done=true` before we close the session (avoids IllegalStateException).
+  Future<void> _haltSessionGeneration(InferenceModelSession session) async {
+    try {
+      await session.stopGeneration();
+    } catch (_) {
+      // Already stopped or platform detached.
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+  }
+
+  /// MediaPipe's `LlmInferenceSession.close()` throws `IllegalStateException`
+  /// when the underlying inference is still flagged as in-progress (e.g. when
+  /// the model bailed out without setting `done=true`, which happens when the
+  /// prompt almost saturates the KV cache or the user cancelled mid-stream).
+  /// Always try [InferenceModelSession.stopGeneration] before [close] in those
+  /// cases so the next `createSession` succeeds.
+  Future<void> _closeSessionSafely(InferenceModelSession session) async {
+    if (_generationCancelRequested) {
+      await _haltSessionGeneration(session);
+    }
+    try {
       await session.close();
+      return;
+    } catch (e) {
+      if (kDebugMode) {
+        developer.log(
+          'session.close() failed, attempting stopGeneration: $e',
+          name: _logName,
+        );
+      }
+    }
+    await _haltSessionGeneration(session);
+    try {
+      await session.close();
+    } catch (_) {
+      // The platform side is in a bad state; the next createSession will
+      // either re-use a clean session or surface the underlying problem.
     }
   }
 
   String _fallbackReply(String userMessage) {
-    final String lower = userMessage.toLowerCase().trim();
-    if (lower.isEmpty) {
-      return 'Ask how to use Antwise — for example navigation, tables, pages, '
-          'settings, or your workspace.';
+    if (userMessage.trim().isEmpty) {
+      return 'Please enter a message.';
     }
-    if (RegExp(r'^(hi+|hello|hey|howdy|yo|sup)\b').hasMatch(lower)) {
-      return 'Hello! I help only with Antwise — navigation, pages, tables, '
-          'settings, and in-app troubleshooting. What would you like to do?';
-    }
-    return 'I could not generate an answer. Ask about Antwise features or '
-        'describe what you are trying to do in the app.';
+    return 'I could not generate a response. Please try again.';
   }
 
   Stream<String> streamResponse(
@@ -760,12 +1104,14 @@ final class AIService extends GetxService {
     bool logDiagnostics = true,
     bool applyIntentShortcuts = true,
     String tableOutlineSnapshot = '',
+    String workspaceConversationSummary = '',
   }) async* {
     final String reply = await generateResponse(
       userMessage,
       logDiagnostics: logDiagnostics,
       applyIntentShortcuts: applyIntentShortcuts,
       tableOutlineSnapshot: tableOutlineSnapshot,
+      workspaceConversationSummary: workspaceConversationSummary,
     );
     yield reply;
   }
@@ -773,15 +1119,24 @@ final class AIService extends GetxService {
   Stream<String> generateResponseStream(String userMessage) =>
       streamResponse(userMessage);
 
-  Future<void> stopGeneration() async {}
+  Future<void> stopGeneration() async {
+    _generationCancelRequested = true;
+    final InferenceModelSession? session = _activeInferenceSession;
+    if (session != null) {
+      await _haltSessionGeneration(session);
+    }
+    // Do not await [_exclusiveInferenceChain] here — [stopGeneration] is often
+    // invoked from inside a [withExclusiveInference] turn; waiting would deadlock.
+  }
 
   Future<void> _ensureModelReady({
     void Function(int received, int? total)? onProgress,
   }) async {
+    if (onProgress != null) {
+      _installProgressReporter = onProgress;
+    }
     try {
-      _defaultModelEnsureFuture ??= _installDefaultModel(
-        onProgress: onProgress,
-      );
+      _defaultModelEnsureFuture ??= _installDefaultModel();
       await _defaultModelEnsureFuture!;
     } catch (_) {
       _defaultModelEnsureFuture = null;
@@ -789,39 +1144,30 @@ final class AIService extends GetxService {
     }
   }
 
-  Future<void> _installDefaultModel({
-    void Function(int received, int? total)? onProgress,
-  }) async {
-    _log('Installing default Gemma model');
+  Future<void> _installDefaultModel() async {
+    _log('Installing DeepSeek R1 model');
     final String? token = _readHuggingFaceToken();
-    final String modelUrl =
-        kIsWeb ? _defaultGemmaModelUrlWeb : _defaultGemmaModelUrlNative;
-    final ModelFileType modelFileType =
-        kIsWeb ? ModelFileType.task : ModelFileType.litertlm;
     try {
       await FlutterGemma.installModel(
-        modelType: _defaultModelType,
-        fileType: modelFileType,
-      ).fromNetwork(modelUrl, token: token).withProgress((int progress) {
-        if (onProgress == null) {
-          return;
-        }
-        final int received = (progress * 10).clamp(0, 1000);
-        onProgress(received, 1000);
-      }).install();
+            modelType: _defaultModelType,
+            fileType: _defaultModelFileType,
+          )
+          .fromNetwork(_defaultDeepSeekModelUrl, token: token)
+          .withProgress(_emitInstallProgress)
+          .install();
     } catch (e) {
       final String message = e.toString();
       if (message.contains('401') || message.contains('restricted')) {
         throw StateError(
-          'Default Gemma model download is gated on Hugging Face. '
+          'DeepSeek model download is gated on Hugging Face. '
           'Set HF_TOKEN in .env and make sure your account has access to '
-          'litert-community/gemma-4-E2B-it-litert-lm.',
+          'litert-community/DeepSeek-R1-Distill-Qwen-1.5B.',
         );
       }
       rethrow;
     }
-    onProgress?.call(1, 1);
-    _log('Default Gemma model ready');
+    _emitInstallProgress(100);
+    _log('DeepSeek R1 model ready');
   }
 
   String? _readHuggingFaceToken() {

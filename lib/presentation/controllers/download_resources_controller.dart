@@ -39,6 +39,17 @@ class DownloadResourcesController extends GetxController {
   /// Retry after a failure (or to resume from a partial `.partial` file).
   Future<void> retry() => _startDownload();
 
+  void _applyDownloadProgress(double value) {
+    final double p = value.clamp(0.0, 1.0);
+    final int pct = (p * 100).round().clamp(0, 100);
+    void apply() {
+      progress.value = p;
+      statusMessage.value = 'Downloading app resources… $pct%';
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => apply());
+  }
+
   Future<void> _startDownload() async {
     if (isBusy.value) {
       return;
@@ -54,14 +65,7 @@ class DownloadResourcesController extends GetxController {
         return;
       }
       statusMessage.value = 'Downloading app resources…';
-      await _downloadResources(
-        onProgress: (double value) {
-          progress.value = value.clamp(0.0, 1.0);
-          statusMessage.value =
-              'Downloading app resources… '
-              '${(value * 100).clamp(0, 100).toStringAsFixed(0)}%';
-        },
-      );
+      await _downloadResources(onProgress: _applyDownloadProgress);
       await _markDownloaded();
 
       progress.value = 1.0;

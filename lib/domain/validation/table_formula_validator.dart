@@ -25,6 +25,8 @@ class TableFormulaValidator {
     'IF',
     'LOOKUP',
     'TODAY',
+    'DATE_ADD',
+    'DAYS_AGO',
   };
 
   static bool isAllowedFunctionName(String name) =>

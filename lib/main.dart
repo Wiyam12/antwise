@@ -36,7 +36,7 @@ Future<void> main() async {
   Get.put<AppThemeController>(themeController, permanent: true);
   final AIService aiService = AIService();
   Get.put<AIService>(aiService, permanent: true);
-  // Prime Gemma runtime after first frame so startup UI is not blocked.
+  // Prime on-device AI runtime after first frame so startup UI is not blocked.
   WidgetsBinding.instance.addPostFrameCallback((_) {
     unawaited(aiService.warmUpModelSession());
   });

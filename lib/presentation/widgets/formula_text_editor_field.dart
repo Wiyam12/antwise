@@ -52,6 +52,8 @@ class _FormulaTextEditorFieldState extends State<FormulaTextEditorField> {
     'IF': 'IF(?, ?, ?)',
     'LOOKUP': 'LOOKUP(?, ?, ?)',
     'TODAY': 'TODAY()',
+    'DATE_ADD': 'DATE_ADD(TODAY(), ?)',
+    'DAYS_AGO': 'DAYS_AGO(?)',
   };
 
   late final FocusNode _focus = FocusNode();
